@@ -1,0 +1,4 @@
+torch>=1.9
+torchvision
+nvidia-ml-py3
+numpy

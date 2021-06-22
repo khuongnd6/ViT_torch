@@ -35,15 +35,40 @@ python main_dino.py --arch "vit_small" --patch_size 8 --out_dim 65536 \
 
 
 
-python torch_data.py --epoch 10 --dataset cifar10 --bs 512 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 512 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 1024 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 2048 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 4096 --lr 0.001 --arch dino_vits16
 
 
 
-    ('device',  'cuda',  str,  ['cuda', 'cpu']),
-    ('epoch',  10,  int),
-    ('dataset', 'cifar10', str, ['cifar10', 'cifar100']),
-    (['batchsize', 'bs'], 512, int),
-    ('data_path', '/host/ubuntu/torch'),
-    (['arch', 'a'], 'dino_vits16', str, ['dino_vits16']),
-    (['learningrate', 'lr'], 0.001),
-    ('stats_json', './logs/stats_latest.json', str)
+
+python main.py --epoch 5 --dataset stl10 --bs 512 --lr 0.001 --arch dino_vits16
+python main.py --epoch 5 --dataset stl10 --bs 1024 --lr 0.001 --arch dino_vits16
+python main.py --epoch 5 --dataset stl10 --bs 2048 --lr 0.001 --arch dino_vits16
+
+python main.py --epoch 5 --dataset stl10 --bs 128 --lr 0.001 --arch dino_vits8
+python main.py --epoch 5 --dataset stl10 --bs 256 --lr 0.001 --arch dino_vits8
+python main.py --epoch 5 --dataset stl10 --bs 512 --lr 0.001 --arch dino_vits8
+python main.py --epoch 5 --dataset stl10 --bs 1024 --lr 0.001 --arch dino_vits8
+
+python main.py --epoch 5 --dataset stl10 --bs 128 --lr 0.001 --arch dino_vitb16
+python main.py --epoch 5 --dataset stl10 --bs 256 --lr 0.001 --arch dino_vitb16
+python main.py --epoch 5 --dataset stl10 --bs 512 --lr 0.001 --arch dino_vitb16
+
+python main.py --epoch 5 --dataset stl10 --bs 64 --lr 0.001 --arch dino_vitb8
+python main.py --epoch 5 --dataset stl10 --bs 128 --lr 0.001 --arch dino_vitb8
+python main.py --epoch 5 --dataset stl10 --bs 256 --lr 0.001 --arch dino_vitb8
+
+
+
+python main.py --epoch 10 --dataset cifar10 --bs 512 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 1024 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 2048 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 4096 --lr 0.001 --arch dino_vits16
+python main.py --epoch 10 --dataset cifar10 --bs 8192 --lr 0.001 --arch dino_vits16
+
+
+
+
+

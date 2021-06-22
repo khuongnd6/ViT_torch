@@ -1,0 +1,104 @@
+{
+    "210622_071233": {
+        "info": {
+            "device": "cuda",
+            "epoch": 5,
+            "dataset": "stl10",
+            "bs": 128,
+            "data_path": "/host/ubuntu/torch",
+            "arch": "dino_vits8",
+            "lr": 0.001,
+            "stats_json": "./logs/stats/stats_210622_071233.json",
+            "master_stats_json": "./logs/stats_master.json",
+            "train": true,
+            "test": true
+        },
+        "telem": {
+            "hardware": "1x3090",
+            "gpu_total_memory": 23.69952392578125,
+            "sample_count_train": 5000,
+            "sample_count_val": 8000,
+            "completed": false,
+            "time_stamp": "210622_071233",
+            "time_start": 1624345953.3031006,
+            "time_finish": null,
+            "time_elapsed": null
+        },
+        "train": [
+            {
+                "epoch": 1,
+                "time_start": 1624345967.9743047,
+                "time_finish": 1624345976.3363984,
+                "time_cost": 8.362093687057495,
+                "loss": 1.416619023680687,
+                "acc": 0.5256,
+                "vram": 8.82763671875
+            },
+            {
+                "epoch": 2,
+                "time_start": 1624345980.9089518,
+                "time_finish": 1624345988.5343556,
+                "time_cost": 7.625403881072998,
+                "loss": 0.73416897803545,
+                "acc": 0.8088,
+                "vram": 15.56982421875
+            },
+            {
+                "epoch": 3,
+                "time_start": 1624345993.1223054,
+                "time_finish": 1624346000.7790108,
+                "time_cost": 7.656705379486084,
+                "loss": 0.6938817396759986,
+                "acc": 0.8518000000000001,
+                "vram": 15.67724609375
+            },
+            {
+                "epoch": 4,
+                "time_start": 1624346005.411911,
+                "time_finish": 1624346013.1318803,
+                "time_cost": 7.719969272613525,
+                "loss": 0.6634595043957233,
+                "acc": 0.8994,
+                "vram": 15.67724609375
+            }
+        ],
+        "val": [
+            {
+                "epoch": 1,
+                "time_start": 1624345976.338079,
+                "time_finish": 1624345980.9029996,
+                "time_cost": 4.564920663833618,
+                "loss": 0.8024995364840068,
+                "acc": 0.7515,
+                "vram": 15.56982421875
+            },
+            {
+                "epoch": 2,
+                "time_start": 1624345988.5360885,
+                "time_finish": 1624345993.115652,
+                "time_cost": 4.579563617706299,
+                "loss": 0.7580730177107311,
+                "acc": 0.804125,
+                "vram": 15.67724609375
+            },
+            {
+                "epoch": 3,
+                "time_start": 1624346000.7807236,
+                "time_finish": 1624346005.40515,
+                "time_cost": 4.624426364898682,
+                "loss": 0.7273633130012996,
+                "acc": 0.842125,
+                "vram": 15.67724609375
+            },
+            {
+                "epoch": 4,
+                "time_start": 1624346013.1337395,
+                "time_finish": 1624346017.7856658,
+                "time_cost": 4.651926279067993,
+                "loss": 0.7189063174383981,
+                "acc": 0.8761250000000002,
+                "vram": 15.67724609375
+            }
+        ]
+    }
+}

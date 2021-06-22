@@ -1,0 +1,28 @@
+{
+    "info": {
+        "device": "cuda",
+        "epoch": 5,
+        "dataset": "stl10",
+        "bs": 2048,
+        "data_path": "/host/ubuntu/torch",
+        "arch": "dino_vits16",
+        "lr": 0.001,
+        "stats_json": "./logs/stats/stats_210622_071214.json",
+        "master_stats_json": "./logs/stats_master.json",
+        "train": true,
+        "test": true
+    },
+    "telem": {
+        "hardware": "1x3090",
+        "gpu_total_memory": 23.69952392578125,
+        "sample_count_train": 5000,
+        "sample_count_val": 8000,
+        "completed": false,
+        "time_stamp": "210622_071214",
+        "time_start": 1624345934.2006109,
+        "time_finish": null,
+        "time_elapsed": null
+    },
+    "train": [],
+    "val": []
+}

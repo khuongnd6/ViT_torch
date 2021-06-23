@@ -194,7 +194,7 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
     _labels = []
     
     _pb = ProgressBar(
-        'Train[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}{}]   ',
+        'Train[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}{}] {}  ',
         ProgressBarTextMultiInt([0, args['epoch']], '{}/{}', 1, '0'), # epoch
         ProgressBarTextMultiInt([0, batch_count], '{}/{}', 1, ' '), # step
         ProgressBarFloat(0.0, '{:5.1f}%'), # progress percent
@@ -203,6 +203,7 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
         ProgressBarFloat(.0, '{:4.1f}GB'), # vram
         ProgressBarTime(.0, '{:.1f}'), # time elapsed
         ProgressBarTime(.0, '/{:.1f}'), # time total estimated
+        ProgressBarText(''), # is_best
     )
     _pb(epoch + 1, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
     
@@ -235,7 +236,7 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
         losses.append(loss.item())
         _loss_avg = sum(losses) / len(losses)
         
-        if i % 5 == 0:
+        if i % max(5, int(batch_count // 4)) == 0:
             peak_vram_gb = max(peak_vram_gb, smi.get_vram_used())
         
         _progress_percent = (i + 1) / batch_count * 100
@@ -249,7 +250,11 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
     time_current = time.time()
     time_elapsed = time_current - time_start
     peak_vram_gb = max(peak_vram_gb, smi.get_vram_used())
-    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, None)
+    _acc_best = kwargs.get('acc_best', 200.)
+    _is_best = False
+    if acc_percent / 100. > _acc_best:
+        _is_best = True
+    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, None, '(best)' if _is_best else '')
     _stat = {
         'epoch': epoch + 1,
         'time_start': time_start,
@@ -286,7 +291,7 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
     
     
     _pb = ProgressBar(
-        '  Val[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}{}]   ',
+        '  Val[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}{}] {}  ',
         ProgressBarTextMultiInt([0, args['epoch']], '{}/{}', 1, '0'), # epoch
         ProgressBarTextMultiInt([0, batch_count], '{}/{}', 1, ' '), # step
         ProgressBarFloat(0.0, '{:5.1f}%'), # progress percent
@@ -295,6 +300,7 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
         ProgressBarFloat(.0, '{:4.1f}GB'), # vram
         ProgressBarTime(.0, '{:.1f}'), # time elapsed
         ProgressBarTime(.0, '/{:.1f}'), # time total estimated
+        ProgressBarText(''), # is_best
     )
     _pb(epoch + 1, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
     
@@ -320,7 +326,7 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
         losses.append(loss.item())
         _loss_avg = sum(losses) / len(losses)
         
-        if i % 5 == 0:
+        if i % max(5, int(batch_count // 4)) == 0:
             peak_vram_gb = max(peak_vram_gb, smi.get_vram_used())
         
         _progress_percent = (i + 1) / batch_count * 100
@@ -334,7 +340,11 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
     time_current = time.time()
     time_elapsed = time_current - time_start
     peak_vram_gb = max(peak_vram_gb, smi.get_vram_used())
-    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, None)
+    _acc_best = kwargs.get('acc_best', 200.)
+    _is_best = False
+    if acc_percent / 100. > _acc_best:
+        _is_best = True
+    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, None, '(best)' if _is_best else '')
     _stat = {
         'epoch': epoch + 1,
         'time_start': time_start,
@@ -384,48 +394,55 @@ def main():
             'time_elapsed': None,
             'mode': run_mode,
         },
-        **{_mode: [] for _mode in run_splits},
+        **{_split: [] for _split in run_splits},
     }
     save_stats(stats)
 
-    _improve_index = 2
+    _improve_index = 4
+    _acc_best = {}
     for _epoch in range(args['epoch']):
-        for _mode in run_splits:
-            if _mode == 'train':
+        for _split in run_splits:
+            if _split == 'train':
                 _stat = train_single_epoch(
                     model=model,
                     epoch=_epoch,
                     dataloader=ds.loaders['train'],
                     frozen_backbone=model_backbone if run_mode == 'lineareval' else None,
                     debug=False,
+                    acc_best=_acc_best.get(_split, 0.0),
                 )
+                _acc_best[_split] = max(_acc_best.get(_split, 0.0), _stat['acc'])
                 lr_scheduler.step()
-            elif _mode == 'val':
+            elif _split == 'val':
                 _stat = validate_single_epoch(
                     model=model,
                     epoch=_epoch,
                     dataloader=ds.loaders['test'],
                     debug=False,
+                    acc_best=_acc_best.get(_split, 0.0),
                 )
+                _acc_best[_split] = max(_acc_best.get(_split, 0.0), _stat['acc'])
             else:
                 continue
-            stats[_mode].append(_stat)
+            stats[_split].append(_stat)
             print()
         if args['earlystopping']:
-            _count = 8
+            _count = 5
             _improving = False
-            for _mode in run_splits:
-                if len(stats[_mode]) <= _count:
+            for _split in run_splits:
+                if len(stats[_split]) <= _count:
                     _improving = True
                     break
-                if stats[_mode][-1]['acc'] >= np.mean([v['acc'] for v in stats[_mode][-_count - 1 : -1]]):
+                if stats[_split][-1]['acc'] >= np.mean([v['acc'] for v in stats[_split][-_count - 1 : -1]]):
                     _improving = True
                     break
-                if stats[_mode][-1]['loss'] <= np.mean([v['loss'] for v in stats[_mode][-_count - 1 : -1]]):
+                if stats[_split][-1]['loss'] <= np.mean([v['loss'] for v in stats[_split][-_count - 1 : -1]]):
                     _improving = True
                     break
             if not _improving:
                 _improve_index -= 1
+            else:
+                _improve_index = min(_improve_index + 1, 4)
         print()
         save_stats(stats)
         if _improve_index <= 0:

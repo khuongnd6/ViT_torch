@@ -55,16 +55,18 @@ smi = NVIDIA_SMI(device_id=0)
 
 # %%
 ds = Datasets(
-    dataset='cifar10',
-    root_path='/host/ubuntu/torch',
+    dataset=args['dataset'],
+    root_path=args['data_path'],
     batchsize=args['bs'],
     transform=[],
     download=True,
     splits=['train', 'test'],
     shuffle=True,
     num_workers=4,
+    limit_train=args['limit_train'],
+    limit_test=args['limit_test'],
 )
-ds.info
+print('dataset: {}'.format(json.dumps(ds.info, indent=4)))
 
 
 # %% DISABLED DUE TO CUDA COMPATIBILITY BUG
@@ -190,15 +192,15 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
     _labels = []
     
     _pb = ProgressBar(
-        'Train[{}/{}] step[{}/{}][{}] loss[{}] acc[{}] vram[{}] time[{}/{}]   ',
-        ProgressBarTextMultiInt([0, args['epoch']], 1, '0'), # epoch
-        ProgressBarTextMultiInt([0, batch_count], 1, ' '), # step
+        'Train[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}{}]   ',
+        ProgressBarTextMultiInt([0, args['epoch']], '{}/{}', 1, '0'), # epoch
+        ProgressBarTextMultiInt([0, batch_count], '{}/{}', 1, ' '), # step
         ProgressBarFloat(0.0, '{:5.1f}%'), # progress percent
         ProgressBarFloat(.0, '{:.6f}'), # loss
         ProgressBarFloat(.0, '{:6.2f}%'), # acc
         ProgressBarFloat(.0, '{:4.1f}GB'), # vram
         ProgressBarTime(.0, '{:.1f}'), # time elapsed
-        ProgressBarTime(.0, '{:.1f}'), # time total estimated
+        ProgressBarTime(.0, '/{:.1f}'), # time total estimated
     )
     _pb(epoch + 1, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
     
@@ -245,7 +247,7 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
     time_current = time.time()
     time_elapsed = time_current - time_start
     peak_vram_gb = max(peak_vram_gb, smi.get_vram_used())
-    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, time_elapsed)
+    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, None)
     _stat = {
         'epoch': epoch + 1,
         'time_start': time_start,
@@ -282,7 +284,7 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
     
     
     _pb = ProgressBar(
-        '  Val[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}]   ',
+        '  Val[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}{}]   ',
         ProgressBarTextMultiInt([0, args['epoch']], '{}/{}', 1, '0'), # epoch
         ProgressBarTextMultiInt([0, batch_count], '{}/{}', 1, ' '), # step
         ProgressBarFloat(0.0, '{:5.1f}%'), # progress percent
@@ -405,8 +407,9 @@ def main():
             else:
                 continue
             stats[_mode].append(_stat)
-            print('\n')
+            print()
         
+        print()
         save_stats(stats)
         
 

@@ -315,7 +315,7 @@ class Datasets:
                     transforms.RandomHorizontalFlip(),
                     CIFAR10Policy(),
                     transforms.ToTensor(),
-                    Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
+                    # Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
                 ],
                 'test': [
                     transforms.ToTensor(),

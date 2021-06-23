@@ -39,6 +39,8 @@ config = [
     ('test_only', False, bool),
     ('train_only', False, bool),
     ('lineareval', False, bool),
+    ('earlystopping', True, bool),
+    ('note', '', str, None, 'note to recognize the run'),
 ]
 A = ARGS(config=config)
 
@@ -386,6 +388,7 @@ def main():
     }
     save_stats(stats)
 
+    _improve_index = 2
     for _epoch in range(args['epoch']):
         for _mode in run_splits:
             if _mode == 'train':
@@ -408,9 +411,26 @@ def main():
                 continue
             stats[_mode].append(_stat)
             print()
-        
+        if args['earlystopping']:
+            _count = 8
+            _improving = False
+            for _mode in run_splits:
+                if len(stats[_mode]) <= _count:
+                    _improving = True
+                    break
+                if stats[_mode][-1]['acc'] >= np.mean([v['acc'] for v in stats[_mode][-_count - 1 : -1]]):
+                    _improving = True
+                    break
+                if stats[_mode][-1]['loss'] <= np.mean([v['loss'] for v in stats[_mode][-_count - 1 : -1]]):
+                    _improving = True
+                    break
+            if not _improving:
+                _improve_index -= 1
         print()
         save_stats(stats)
+        if _improve_index <= 0:
+            print('\nThe model is not improving. Training will now stop.')
+            break
         
 
     print()

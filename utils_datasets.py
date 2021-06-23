@@ -1,4 +1,5 @@
 # %%
+from numpy.lib.arraysetops import isin
 import torch
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
@@ -349,21 +350,21 @@ class Datasets:
                 'test': {'train': False},
             },
         },
-        'WorkInProgress_imagenet': {
-            'dataset_fn': torchvision.datasets.ImageFolder,
-            'norm_values': {
-                'mean': [0.485, 0.456, 0.406],
-                'std': [0.229, 0.224, 0.225],
-            },
-            'num_labels': 1000,
-            'transform': {
-                'train': [
-                    transforms.RandomHorizontalFlip(),
-                    ImageNetPolicy(),
-                ],
-                'test': [],
-            },
-        },
+        # 'WorkInProgress_imagenet': {
+        #     'dataset_fn': torchvision.datasets.ImageFolder,
+        #     'norm_values': {
+        #         'mean': [0.485, 0.456, 0.406],
+        #         'std': [0.229, 0.224, 0.225],
+        #     },
+        #     'num_labels': 1000,
+        #     'transform': {
+        #         'train': [
+        #             transforms.RandomHorizontalFlip(),
+        #             ImageNetPolicy(),
+        #         ],
+        #         'test': [],
+        #     },
+        # },
         # '<other>': {
         #     'norm_values': {
         #         'mean': [0.5, 0.5, 0.5],
@@ -382,6 +383,8 @@ class Datasets:
                 shuffle=True,
                 num_workers=4,
                 splits=['train', 'test'],
+                limit_train=0,
+                limit_test=0,
                 ):
         self.dataset = str(dataset).lower()
         if self.dataset not in self._datasets_config:
@@ -389,10 +392,7 @@ class Datasets:
                 self.dataset,
                 '|'.join(list(self._datasets_config.values()))
             ))
-        self.config = self._datasets_config[self.dataset]
         self.root_path = root_path
-        self.download = bool(download)
-        # self.transform_base = transform
         self.bs = batchsize
         if isinstance(self.bs, int):
             self.bs = [self.bs for _ in range(len(splits))]
@@ -402,6 +402,7 @@ class Datasets:
                 k: v
                 for v, k in zip(self.bs, splits)
             }
+        self.config = self._datasets_config[self.dataset]
         self.num_labels = int(self.config['num_labels'])
         self.sets = {}
         self.loaders = {}
@@ -411,29 +412,67 @@ class Datasets:
             'sample_count': {},
             'num_labels': self.num_labels,
         }
+        self.limits = {
+            'train': limit_train,
+            'test': limit_test,
+        }
         for _split in splits:
-            _ds_kwargs = self._get_ds_kwargs(
-                transform=self.config['transform'][_split],
-                norm_values=self.config['norm_values'],
-                download=self.download,
-                root=self.root_path,
-                **self.config['split'][_split],
-            )
-            _set = self.config['dataset_fn'](**_ds_kwargs)
-            _loader = torch.utils.data.DataLoader(
-                _set,
-                batch_size=self.bs[_split],
-                shuffle=bool(shuffle),
+            # _ds_kwargs = self._get_ds_kwargs(
+            #     transform=self.config['transform'][_split],
+            #     norm_values=self.config['norm_values'],
+            #     download=self.download,
+            #     root=self.root_path,
+            #     **self.config['split'][_split],
+            # )
+            # _set = self.config['dataset_fn'](**_ds_kwargs)
+            # _loader = torch.utils.data.DataLoader(
+            #     _set,
+            #     batch_size=self.bs[_split],
+            #     shuffle=bool(shuffle),
+            #     num_workers=num_workers,
+            # )
+            # _batch_count = len(_loader)
+            # _sample_count = len(_set)
+            
+            
+            r = self._get_dataset(
+                config=self.config,
+                split=_split,
+                download=bool(download),
+                root_path=self.root_path,
+                shuffle=(shuffle and _split == 'train'),
                 num_workers=num_workers,
+                bs=self.bs[_split],
+                limit=self.limits[_split],
             )
-            _batch_count = len(_loader)
-            _sample_count = len(_set)
-            self.sets[_split] = _set
-            self.loaders[_split] = _loader
-            self.info['batch_count'][_split] = _batch_count
-            self.info['sample_count'][_split] = _sample_count
+            
+            self.sets[_split] = r['set']
+            self.loaders[_split] = r['loader']
+            self.info['batch_count'][_split] = r['batch_count']
+            self.info['sample_count'][_split] = r['sample_count']
         
-        
+    @classmethod
+    def download_and_prepare(cls, dataset=None, path='./data'):
+        if dataset is None:
+            dataset = list(cls._datasets_config.keys())
+        if isinstance(dataset, list):
+            return [cls.download_and_prepare(v) for v in dataset]
+        if dataset in cls._datasets_config:
+            _config = cls._datasets_config[dataset]
+            for _split in ['train', 'test']:
+                _ = cls._get_dataset(
+                    config=_config,
+                    split='train',
+                    download=True,
+                    root_path=path,
+                    shuffle=False,
+                    num_workers=4,
+                    bs=512,
+                )
+                del _
+            return True
+        else:
+            print('Skipped [{}], not supported'.format(dataset))
     
     @classmethod
     def _get_ds_kwargs(cls,
@@ -461,8 +500,33 @@ class Datasets:
         }
         return _ds_kwargs
     
-    def get_dataset(self, ):
-        return None
+    @classmethod
+    def _get_dataset(cls, config, split, download, root_path, shuffle, num_workers=4, bs=128, limit=0):
+        _ds_kwargs = cls._get_ds_kwargs(
+            transform=config['transform'][split],
+            norm_values=config['norm_values'],
+            download=download,
+            root=root_path,
+            **config['split'][split],
+        )
+        _set = config['dataset_fn'](**_ds_kwargs)
+        
+        if isinstance(limit, int) and limit > 0:
+            _set = torch.utils.data.Subset(_set, torch.arange(limit))
+        _loader = torch.utils.data.DataLoader(
+            _set,
+            batch_size=bs,
+            shuffle=bool(shuffle),
+            num_workers=num_workers,
+        )
+        _batch_count = len(_loader)
+        _sample_count = len(_set)
+        return {
+            'set': _set,
+            'loader': _loader,
+            'batch_count': _batch_count,
+            'sample_count': _sample_count,
+        }
 
 
 # %%

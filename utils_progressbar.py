@@ -8,13 +8,19 @@ class ProgressBarText:
         self.update_txt()
     
     def update(self, value):
-        self.value = str(value)
+        self.value = value
     
     def update_txt(self):
+        if self.value is None:
+            self.txt = ''
+            return False
         self.txt = str(self.value)
     
     def __call__(self):
         self.update_txt()
+        if not isinstance(self.txt, str):
+            self.txt = None
+            return ''
         return self.txt
 
 class ProgressBarInt(ProgressBarText):
@@ -25,13 +31,15 @@ class ProgressBarInt(ProgressBarText):
         self.update_txt()
     
     def update(self, value):
-        self.value = int(value)
+        self.value = value
     
     def update_txt(self):
+        if self.value is None:
+            self.txt = ''
+            return False
         self.txt = str(self.value)
         if isinstance(self.fill_length, int):
             self.txt = self.txt.rjust(self.fill_length, self.fill_char)
-    
 
 class ProgressBarFloat(ProgressBarText):
     def __init__(self, value=0.0, format='{:.1f}'):
@@ -40,9 +48,12 @@ class ProgressBarFloat(ProgressBarText):
         self.update_txt()
     
     def update(self, value):
-        self.value = float(value)
+        self.value = value
     
     def update_txt(self):
+        if self.value is None:
+            self.txt = ''
+            return False
         self.txt = self.format.format(self.value)
 
 class ProgressBarTime(ProgressBarText):
@@ -53,9 +64,12 @@ class ProgressBarTime(ProgressBarText):
         self.update_txt()
     
     def update(self, value):
-        self.value = float(value)
+        self.value = value
     
     def update_txt(self):
+        if self.value is None:
+            self.txt = ''
+            return False
         magnitudes = {
             'y': 31536000,
             'm': 86400 * 30,
@@ -80,11 +94,14 @@ class ProgressBarTextMulti(ProgressBarText):
         pass
 
 class ProgressBarTextMultiInt(ProgressBarTextMulti):
-    def __init__(self, value=[], fill_length=None, fill_char=' '):
+    def __init__(self, value=[], format=None, fill_length=1, fill_char=' '):
         self.fill_length = fill_length
         self.fill_char = str(fill_char)[0]
         self.value = []
         self.update(value)
+        self.format = format
+        if not isinstance(self.format, str):
+            self.format = '[{}, {}]' * len(self.value)
         self.update_txt()
     
     def update(self, value):
@@ -97,13 +114,12 @@ class ProgressBarTextMultiInt(ProgressBarTextMulti):
                 self.value.append(v)
         if isinstance(self.fill_length, int):
             self.fill_length = max(self.fill_length, *[len(str(v)) for v in self.value], 1)
-        # self.fill_length
     
     def update_txt(self):
         # self.txt = str(self.value)
-        self.txt = [str(v) for v in self.value]
+        self.txt = self.format.format(*[v for v in self.value])
         if isinstance(self.fill_length, int):
-            self.txt = [v.rjust(self.fill_length, self.fill_char) for v in self.txt]
+            self.txt = self.format.format(*[str(v).rjust(self.fill_length, self.fill_char) for v in self.value])
 
 class ProgressBar:
     def __init__(self, s='', *args, **kwargs):
@@ -136,11 +152,11 @@ class ProgressBar:
     
     def get_strs_from_Text(self, v):
         if isinstance(v, ProgressBarTextMulti):
-            return v()
+            return [v()]
         elif isinstance(v, ProgressBarText):
             return [v()]
         else:
-            return str(v)
+            return [str(v)]
     
     def print(self, fill_length=1, printing=True):
         str_args = [

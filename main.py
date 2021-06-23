@@ -25,13 +25,15 @@ time_stamp = time.strftime('%y%m%d_%H%M%S')
 # %%
 config = [
     ('device',  'cuda',  str,  ['cuda', 'cpu']),
-    ('epoch',  100,  int),
-    ('dataset', 'cifar10', str, ['cifar10', 'cifar100', 'stl10']),
-    ('bs', 512, int),
-    ('data_path', '/host/ubuntu/torch'),
+    ('epoch',  100,  int, None, 'number of training epochs'),
+    ('dataset', 'cifar10', str, ['cifar10', 'cifar100', 'stl10'], 'name of the dataset'),
+    ('bs', 512, int, None, 'batch size'),
+    ('data_path', '/host/ubuntu/torch', str, None, 'path of the folder to put the pretrained models and datasets'),
     ('arch', 'dino_vits16', str, ['dino_vits16', 'dino_vits8', 'dino_vitb16', 'dino_vitb8', 'dino_resnet50']),
-    ('lr', 0.001),
-    ('lr_schedule_half', 5, int),
+    ('lr', 0.001, float, None,'initial learning rate'),
+    ('lr_schedule_half', 5, int, None, 'number of epochs between halving the learning rate'),
+    ('limit_train', 0, int, None, 'set to int >0 to limit the number of training examples'),
+    ('limit_test', 0, int, None, 'set to int >0 to limit the number of testing examples'),
     ('stats_json', './logs/stats/stats_{}.json'.format(time_stamp), str),
     ('master_stats_json', './logs/stats_master.json'.format(time_stamp), str),
     ('test_only', False, bool),
@@ -107,8 +109,9 @@ model_backbone.to(args['device'])
 
 _fc_units = {
     'stl10': [128],
-    'cifar10': [128],
-    'cifar100': [256],
+    # 'cifar10': [128],
+    'cifar10': [],
+    'cifar100': [],
     # 'imagenet': [],
 }
 
@@ -196,12 +199,11 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
         ProgressBarFloat(.0, '{:4.1f}GB'), # vram
         ProgressBarTime(.0, '{:.1f}'), # time elapsed
         ProgressBarTime(.0, '{:.1f}'), # time total estimated
-        # pb_time_eta,
     )
-    _pb(epoch, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
+    _pb(epoch + 1, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
     
-    # set frozen_backbone to eval mode to freeze it
     model.train()
+    # set frozen_backbone to eval mode to freeze it
     if frozen_backbone is not None:
         frozen_backbone.eval()
     
@@ -213,9 +215,9 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         
-        # if debug:
-        #     _outputs.append(outputs.cpu().detach().numpy())
-        #     _labels.append(labels.cpu().detach().numpy())
+        if debug:
+            _outputs.append(outputs.cpu().detach().numpy())
+            _labels.append(labels.cpu().detach().numpy())
         
         optimizer.zero_grad()
         loss.backward()
@@ -238,7 +240,7 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
         time_ett = time_elapsed / max(0.000001, _progress_percent / 100)
         time_eta = time_ett * (1 - _progress_percent / 100)
         
-        _pb(epoch, i + 1, _progress_percent, _loss_avg, acc_percent, peak_vram_gb, time_elapsed, time_ett)
+        _pb(epoch + 1, i + 1, _progress_percent, _loss_avg, acc_percent, peak_vram_gb, time_elapsed, time_ett)
     
     time_current = time.time()
     time_elapsed = time_current - time_start
@@ -263,7 +265,7 @@ def train_single_epoch(model, epoch, dataloader, frozen_backbone=None, debug=Fal
         np.save(open(os.path.join(_dp, 'labels'), 'wb'), _labels)
     return _stat
 
-# @torch.no_grad()
+@torch.no_grad()
 def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
     losses = []
     _loss_avg = -1.
@@ -280,20 +282,18 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
     
     
     _pb = ProgressBar(
-        '  Val[{}/{}] step[{}/{}][{}] loss[{}] acc[{}] vram[{}] time[{}/{}]   ',
-        ProgressBarTextMultiInt([0, args['epoch']], 1, '0'), # epoch
-        ProgressBarTextMultiInt([0, batch_count], 1, ' '), # step
+        '  Val[{}] step[{}][{}] loss[{}] acc[{}] vram[{}] time[{}]   ',
+        ProgressBarTextMultiInt([0, args['epoch']], '{}/{}', 1, '0'), # epoch
+        ProgressBarTextMultiInt([0, batch_count], '{}/{}', 1, ' '), # step
         ProgressBarFloat(0.0, '{:5.1f}%'), # progress percent
         ProgressBarFloat(.0, '{:.6f}'), # loss
         ProgressBarFloat(.0, '{:6.2f}%'), # acc
         ProgressBarFloat(.0, '{:4.1f}GB'), # vram
         ProgressBarTime(.0, '{:.1f}'), # time elapsed
-        ProgressBarTime(.0, '{:.1f}'), # time total estimated
-        # pb_time_eta,
+        ProgressBarTime(.0, '/{:.1f}'), # time total estimated
     )
-    _pb(epoch, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
+    _pb(epoch + 1, 0, 0., _loss_avg, 0.0, peak_vram_gb, 0.0, time_ett)
     
-    # set frozen_backbone to eval mode to freeze it
     model.eval()
     
     for i, data in enumerate(dataloader, 0):
@@ -304,9 +304,9 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         
-        # if debug:
-        #     _outputs.append(outputs.cpu().detach().numpy())
-        #     _labels.append(labels.cpu().detach().numpy())
+        if debug:
+            _outputs.append(outputs.cpu().detach().numpy())
+            _labels.append(labels.cpu().detach().numpy())
         
         _correct = count_correct(outputs, labels)
         correct_count += _correct
@@ -325,12 +325,12 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
         time_ett = time_elapsed / max(0.000001, _progress_percent / 100)
         time_eta = time_ett * (1 - _progress_percent / 100)
         
-        _pb(epoch, i + 1, _progress_percent, _loss_avg, acc_percent, peak_vram_gb, time_elapsed, time_ett)
+        _pb(epoch + 1, i + 1, _progress_percent, _loss_avg, acc_percent, peak_vram_gb, time_elapsed, time_ett)
     
     time_current = time.time()
     time_elapsed = time_current - time_start
     peak_vram_gb = max(peak_vram_gb, smi.get_vram_used())
-    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, time_elapsed)
+    _pb(epoch + 1, batch_count, 100., _loss_avg, acc_percent, peak_vram_gb, time_elapsed, None)
     _stat = {
         'epoch': epoch + 1,
         'time_start': time_start,
@@ -352,74 +352,78 @@ def validate_single_epoch(model, epoch, dataloader, debug=False, **kwargs):
 
 
 # %% RUN
-assert not (args['train_only'] and args['test_only']), 'at max only one of flags `train_only` and `test_only` allowed'
+def main():
+    time_start = time.time()
+    assert not (args['train_only'] and args['test_only']), 'at max only one of flags `train_only` and `test_only` allowed'
 
-run_splits = ['train', 'val']
-if args['train_only']:
-    run_splits = ['train']
-if args['test_only']:
-    run_splits = ['val']
+    run_splits = ['train', 'val']
+    if args['train_only']:
+        run_splits = ['train']
+    if args['test_only']:
+        run_splits = ['val']
 
-run_mode = 'finetune'
-if args.get('lineareval'):
-    run_mode = 'lineareval'
+    run_mode = 'finetune'
+    if args.get('lineareval'):
+        run_mode = 'lineareval'
 
-stats = {
-    'info': A.info,
-    'telem': {
-        'hardware': '1x3090',
-        'gpu_total_memory': float(smi.info['total']),
-        'sample_count_train': ds.info['sample_count']['train'],
-        'sample_count_val': ds.info['sample_count']['test'],
-        'completed': False,
-        'time_stamp': time_stamp,
-        'time_start': time_start_master,
-        'time_finish': None,
-        'time_elapsed': None,
-        'mode': run_mode,
-    },
-    **{_mode: [] for _mode in run_splits},
-}
-save_stats(stats)
-
-for _epoch in range(args['epoch']):
-    for _mode in run_splits:
-        if _mode == 'train':
-            _stat = train_single_epoch(
-                model=model,
-                epoch=_epoch,
-                dataloader=ds.loaders['train'],
-                frozen_backbone=model_backbone if run_mode == 'lineareval' else None,
-                debug=False,
-            )
-            lr_scheduler.step()
-        elif _mode == 'val':
-            _stat = validate_single_epoch(
-                model=model,
-                epoch=_epoch,
-                dataloader=ds.loaders['test'],
-                debug=False,
-            )
-        else:
-            continue
-        stats[_mode].append(_stat)
-        print()
-    
+    stats = {
+        'info': A.info,
+        'telem': {
+            'hardware': '1x3090',
+            'gpu_total_memory': float(smi.info['total']),
+            'sample_count_train': ds.info['sample_count']['train'],
+            'sample_count_val': ds.info['sample_count']['test'],
+            'completed': False,
+            'time_stamp': time_stamp,
+            'time_start': time_start,
+            'time_finish': None,
+            'time_elapsed': None,
+            'mode': run_mode,
+        },
+        **{_mode: [] for _mode in run_splits},
+    }
     save_stats(stats)
-    
 
-print()
-print('Finished Training')
+    for _epoch in range(args['epoch']):
+        for _mode in run_splits:
+            if _mode == 'train':
+                _stat = train_single_epoch(
+                    model=model,
+                    epoch=_epoch,
+                    dataloader=ds.loaders['train'],
+                    frozen_backbone=model_backbone if run_mode == 'lineareval' else None,
+                    debug=False,
+                )
+                lr_scheduler.step()
+            elif _mode == 'val':
+                _stat = validate_single_epoch(
+                    model=model,
+                    epoch=_epoch,
+                    dataloader=ds.loaders['test'],
+                    debug=False,
+                )
+            else:
+                continue
+            stats[_mode].append(_stat)
+            print('\n')
+        
+        save_stats(stats)
+        
 
-time_current = time.time()
-stats['telem']['time_finish'] = time_current
-stats['telem']['time_elapsed'] = time_current - time_start_master
-stats['telem']['completed'] = True
-save_stats(stats)
+    print()
+    print('Finished Training')
 
-print('Stats saved at <{}> and <{}>'.format(args['stats_json'], args['master_stats_json']))
+    time_current = time.time()
+    stats['telem']['time_finish'] = time_current
+    stats['telem']['time_elapsed'] = time_current - time_start
+    stats['telem']['completed'] = True
+    save_stats(stats)
+
+    print('Stats saved at <{}> and <{}>'.format(args['stats_json'], args['master_stats_json']))
 
 # %% clean up
-smi.dispose()
+if __name__ == '__main__':
+    main()
+    smi.dispose()
 
 # %%

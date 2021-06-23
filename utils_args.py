@@ -48,7 +48,10 @@ class ARGS:
                 assert isinstance(_value, _type), 'arg `{}` must be of type <{}>, got {}'.format(_keys[0], v[2], _value)
             if len(v) >= 4:
                 _set = v[3]
-                assert _value in _set, 'arg `{}` must be one of [{}]'.format(_keys[0], ' | '.join(v[3]))
+                if isinstance(_set, (list, tuple, set)):
+                    _set = list(_set)
+                    if len(_set) >= 1:
+                        assert _value in _set, 'arg `{}` must be one of [{}]'.format(_keys[0], ' | '.join(v[3]))
             self.args = {
                 **self.args,
                 **{

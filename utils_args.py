@@ -43,7 +43,7 @@ class ARGS:
             _value = v[1]
             if len(v) >= 3:
                 _type = v[2]
-                # print(_keys, _value, _type)
+                # print(_keys, _value, type(_value), _type)
                 # print(config)
                 assert isinstance(_value, _type), 'arg `{}` must be of type <{}>, got {}'.format(_keys[0], v[2], _value)
             if len(v) >= 4:
@@ -78,13 +78,24 @@ class ARGS:
         _config_indices = {}
         self._parser = argparse.ArgumentParser(name)
         for i, v in enumerate(self._config):
+            _kwargs_add = {}
             _keys = [v[0]]
             if isinstance(v[0], (list, tuple)):
                 _keys = list(v[0])
+            _value = v[1]
+            _type = None
+            if len(v) >= 3:
+                _type = v[2]
+            elif len(v) == 2:
+                _type = type(_value)
+            if _type is bool:
+                _kwargs_add['nargs'] = '?'
             self._parser.add_argument(
                 *['--{}'.format(_key) for _key in _keys],
-                default=v[1],
-                type=v[2] if len(v) >= 3 else type(v[1]),
+                default=_value,
+                type=_type,
+                help=v[3] if len(v) >= 4 else None,
+                **_kwargs_add,
             )
             for _key in _keys:
                 _config_indices[_key] = i
@@ -96,9 +107,9 @@ class ARGS:
             _config_parsed[_index][1] = _args.__dict__[_key]
         _config_parsed = [tuple(v) for v in _config_parsed]
         self.args_list = _config_parsed
-        print('parsed')
-        print(_config_parsed)
-        print()
+        # print('parsed')
+        # print(_config_parsed)
+        # print()
         # self.update_from_dict(_dict=_args.__dict__)
         self.update_from_list(config=_config_parsed)
         return _args

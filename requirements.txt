@@ -1,4 +1,7 @@
-torch>=1.9
+torch>=1.8
 torchvision
 nvidia-ml-py3
 numpy
+pandas
+# plotly
+# nbformat==4.2

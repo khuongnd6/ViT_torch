@@ -199,7 +199,14 @@ class VisionModelZoo:
             cls.reset_parameters(list(m.children()))
         if hasattr(m, 'reset_parameters'):
             m.reset_parameters()
-
+    
+    @classmethod
+    def get_output_shape(cls, model, input_shape=[1, 3, 32, 32], device='cuda'):
+        _temp_inputs = torch.rand(*input_shape)
+        _ = model.to(device)
+        _output = model(_temp_inputs.to(device)).cpu().detach().numpy()
+        return _output.shape
+        
 
 # %%
 # m = VisionModelZoo.get_model_cait(pretrained=False, image_channels=9, classifier=[49, 31, 7])

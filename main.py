@@ -54,10 +54,10 @@ config = [
     ('limit_test', 0, int, None, 'set to int >0 to limit the number of testing samples'),
     ('stats_json', ''.format(time_stamp), str),
     ('master_stats_json', './logs/stats_master.json', str),
-    ('test_only', False, bool),
-    ('train_only', False, bool),
+    # ('test_only', False, bool),
+    # ('train_only', False, bool),
     ('lineareval', False, bool),
-    ('earlystopping', True, bool),
+    # ('earlystopping', True, bool),
     ('pretrained', False, bool),
     ('note', '', str, None, 'note to recognize the run'),
     ('opt', 'sgd', str, None, 'set the optimizer'),
@@ -83,7 +83,7 @@ def main():
     # smi = NVIDIA_SMI(device_id=0)
     
     _image_channels = 3
-    if args['dataset'] in Datasets._datasets_config:
+    if args['dataset'] in Datasets.available_datasets:
         _transform_resize = []
         if args['image_size'] > 0:
             _transform_resize = [transforms.Resize(args['image_size'],InterpolationMode.BICUBIC)]
@@ -130,12 +130,8 @@ def main():
             classifier=None,
             root_path=args['root_path']
         )
-        
         _input_shape = [1, _image_channels, args['image_size'], args['image_size']]
-        _temp_inputs = torch.rand(*_input_shape)
-        _ = _model_backbone.to(args['device'])
-        _output = _model_backbone(_temp_inputs.to(args['device'])).cpu().detach().numpy()
-        _output_dim = _output.shape[-1]
+        _output_dim = VisionModelZoo.get_output_shape(_model_backbone, _input_shape, args['device'])[-1]
         
         frozen_model_bottom = [_model_backbone]
         model = VisionModelZoo.get_classifier_head(
@@ -158,10 +154,10 @@ def main():
         # frozen_model_top=[],
         opt='sgd',
         loss_fn=nn.CrossEntropyLoss(),
-        lr=0.001,
+        lr=args['lr'],
         # lr_schedule_type='step',
-        lr_schedule_step=10,
-        # lr_schedule_gamma=0.5,
+        lr_schedule_step=args['lr_schedule_half'],
+        lr_schedule_gamma=0.5,
         # pretrained=False,
         device=args['device'],
         # metrics_best=None,

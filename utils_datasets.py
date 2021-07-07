@@ -1,4 +1,5 @@
 # %%
+import enum
 from numpy.lib.arraysetops import isin
 import torch
 import numpy as np
@@ -15,6 +16,7 @@ import time
 # %%
 from skimage.feature import local_binary_pattern
 import cv2
+from torchvision.transforms.transforms import Normalize
 
 # %%
 class Cutout(object):
@@ -537,131 +539,219 @@ class CustomFrozenDatasets:
 
 
 # %%
-class Datasets:
-    _datasets_config = {
-        # 'local': {
-        #     'dataset_fn': torchvision.datasets.ImageFolder,
-        #     'norm_values': {
-        #         # 'mean': [0.44671062065972217, 0.43980983983523964, 0.40664644709967324],
-        #         # 'std': [0.2603409782662331, 0.25657727311344447, 0.27126738145225493],
-        #         'mean': [0.5, 0.5, 0.5],
-        #         'std': [0.25, 0.25, 0.25],
-        #     },
-        #     # 'num_labels': 10,
-        #     'transform': {
-        #         'train': [
-        #             # transforms.RandomCrop(96, padding=8, fill=128),
-        #             transforms.RandomHorizontalFlip(),
-        #             # STL10Policy(),
-        #             transforms.ToTensor(),
-        #         ],
-        #         'test': [
-        #             transforms.ToTensor(),
-        #         ],
-        #     },
-        #     'split': {
-        #         'train': {},
-        #         'test': {},
-        #     },
-        # },
-        'stl10': {
-            'dataset_fn': torchvision.datasets.STL10,
-            'norm_values': {
-                'mean': [0.44671062065972217, 0.43980983983523964, 0.40664644709967324],
-                'std': [0.2603409782662331, 0.25657727311344447, 0.27126738145225493],
-                # 'mean': [0.5, 0.5, 0.5],
-                # 'std': [0.25, 0.25, 0.25],
-            },
-            'num_labels': 10,
-            'transform': {
-                'train': [
-                    transforms.RandomCrop(96, padding=8, fill=128),
-                    transforms.RandomHorizontalFlip(),
-                    # STL10Policy(),
-                    transforms.ToTensor(),
-                ],
-                'test': [
-                    transforms.ToTensor(),
-                ],
-            },
-            'split': {
-                'train': {'split': 'train'},
-                'test': {'split': 'test'},
-            },
-            'shape': [96, 96, 3],
-        },
-        'cifar10': {
-            'dataset_fn': torchvision.datasets.CIFAR10,
-            'norm_values': {
-                'mean': [0.4914, 0.4822, 0.4465],
-                'std': [0.247, 0.243, 0.261],
-            },
-            'num_labels': 10,
-            'transform': {
-                'train': [
-                    transforms.RandomCrop(32, padding=4, fill=128),
-                    transforms.RandomHorizontalFlip(),
-                    CIFAR10Policy(),
-                    transforms.ToTensor(),
-                    # Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
-                ],
-                'test': [
-                    transforms.ToTensor(),
-                ],
-            },
-            'split': {
-                'train': {'train': True},
-                'test': {'train': False},
-            },
-        },
-        'cifar100': {
-            'dataset_fn': torchvision.datasets.CIFAR100,
-            'norm_values': {
-                'mean': [0.50707516,  0.48654887,  0.44091784],
-                'std': [0.26733429,  0.25643846,  0.27615047],
-            },
-            'num_labels': 100,
-            'transform': {
-                'train': [
-                    transforms.RandomCrop(32, padding=4, fill=128),
-                    transforms.RandomHorizontalFlip(),
-                    CIFAR10Policy(),
-                    transforms.ToTensor(),
-                    # Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
-                ],
-                'test': [
-                    transforms.ToTensor(),
-                ],
-            },
-            'split': {
-                'train': {'train': True},
-                'test': {'train': False},
-            },
-        },
-        # 'WorkInProgress_imagenet': {
-        #     'dataset_fn': torchvision.datasets.ImageFolder,
-        #     'norm_values': {
-        #         'mean': [0.485, 0.456, 0.406],
-        #         'std': [0.229, 0.224, 0.225],
-        #     },
-        #     'num_labels': 1000,
-        #     'transform': {
-        #         'train': [
-        #             transforms.RandomHorizontalFlip(),
-        #             ImageNetPolicy(),
-        #         ],
-        #         'test': [],
-        #     },
-        # },
-        # '<other>': {
-        #     'norm_values': {
-        #         'mean': [0.5, 0.5, 0.5],
-        #         'std': [0.5, 0.5, 0.5],
-        #     },
-        #     'num_labels': 100,
-        # },
-    }
+class Datasets_Single:
+    def __init__(self):
+        pass
     
+    @classmethod
+    def get_trans(cls, image_size=32, resize=True, base_train_trans=True, auto_policy=None, norm_values=None, to_tensor=True):
+        trans = {
+            'train': [],
+            'test': [],
+        }
+        
+        if resize:
+            trans['train'].append(transforms.Resize(image_size, F.InterpolationMode.BICUBIC))
+            trans['test'].append(transforms.Resize(image_size, F.InterpolationMode.BICUBIC))
+        
+        if base_train_trans:
+            trans['train'].extend([
+                transforms.RandomCrop(image_size, padding=max(2, int(image_size//12)), fill=128),
+                transforms.RandomHorizontalFlip(),
+            ])
+        if auto_policy is not None:
+            trans['train'].append(auto_policy)
+        
+        if to_tensor:
+            trans['train'].append(transforms.ToTensor())
+            trans['test'].append(transforms.ToTensor())
+        
+        if isinstance(norm_values, dict):
+            trans['train'].append(transforms.Normalize(**norm_values))
+            trans['test'].append(transforms.Normalize(**norm_values))
+        
+        return trans
+
+# %%
+class Datasets_STL10(Datasets_Single):
+    norm_values = {
+        'mean': [0.44671062065972217, 0.43980983983523964, 0.40664644709967324],
+        'std': [0.2603409782662331, 0.25657727311344447, 0.27126738145225493],
+    }
+    num_labels = 10
+    image_shape = [96, 96, 3]
+    image_size = 96
+    
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def get_sets(cls,
+                image_size=0,
+                root_path='/host/ubuntu/torch',
+                norm_values=True,
+                to_tensor=True,
+                auto_policy=False,
+                transform_pre=[],
+                transform_post=[],
+                base_train_trans=True,
+                ):
+        
+        if not isinstance(image_size, int) or image_size <= 0:
+            image_size = cls.image_size
+        
+        if norm_values is True:
+            norm_values = cls.norm_values
+        
+        trans = cls.get_trans(
+            image_size=image_size,
+            resize=image_size != cls.image_size,
+            base_train_trans=base_train_trans,
+            auto_policy=STL10Policy() if auto_policy else None,
+            norm_values=norm_values,
+            to_tensor=to_tensor,
+        )
+        
+        _sets = {}
+        for _split, _training in zip(['train', 'test'], [True, False]):
+            _sets[_split] = torchvision.datasets.STL10(
+                root=root_path,
+                split=_split,
+                # folds=None,
+                transform=transforms.Compose([
+                    *transform_pre,
+                    *trans[_split],
+                    *transform_post,
+                ]),
+                # target_transform=None,
+                download=True,
+            )
+        return _sets
+
+
+
+# %%
+class Datasets_CIFAR10(Datasets_Single):
+    norm_values = {
+        'mean': [0.4914, 0.4822, 0.4465],
+        'std': [0.247, 0.243, 0.261],
+    }
+    num_labels = 10
+    image_shape = [32, 32, 3]
+    image_size = 32
+    
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def get_sets(cls,
+                image_size=0,
+                root_path='/host/ubuntu/torch',
+                norm_values=True,
+                to_tensor=True,
+                auto_policy=False,
+                transform_pre=[],
+                transform_post=[],
+                base_train_trans=True,
+                ):
+        
+        if not isinstance(image_size, int) or image_size <= 0:
+            image_size = cls.image_size
+        
+        if norm_values is True:
+            norm_values = cls.norm_values
+        
+        trans = cls.get_trans(
+            image_size=image_size,
+            resize=image_size != cls.image_size,
+            base_train_trans=base_train_trans,
+            auto_policy=CIFAR10Policy() if auto_policy else None,
+            norm_values=norm_values,
+            to_tensor=to_tensor,
+        )
+        
+        _sets = {}
+        for _split, _training in zip(['train', 'test'], [True, False]):
+            _sets[_split] = torchvision.datasets.CIFAR10(
+                root=root_path,
+                train=_training,
+                transform=transforms.Compose([
+                    *transform_pre,
+                    *trans[_split],
+                    *transform_post,
+                ]),
+                download=True,
+            )
+        return _sets
+
+
+# %%
+# 100
+
+class Datasets_CIFAR100(Datasets_Single):
+    norm_values = {
+        'mean': [0.50707516,  0.48654887,  0.44091784],
+        'std': [0.26733429,  0.25643846,  0.27615047],
+    }
+    num_labels = 100
+    image_shape = [32, 32, 3]
+    image_size = 32
+    
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def get_sets(cls,
+                image_size=0,
+                root_path='/host/ubuntu/torch',
+                norm_values=True,
+                to_tensor=True,
+                auto_policy=False,
+                transform_pre=[],
+                transform_post=[],
+                base_train_trans=True,
+                ):
+        
+        if not isinstance(image_size, int) or image_size <= 0:
+            image_size = cls.image_size
+        
+        if norm_values is True:
+            norm_values = cls.norm_values
+        
+        trans = cls.get_trans(
+            image_size=image_size,
+            resize=image_size != cls.image_size,
+            base_train_trans=base_train_trans,
+            auto_policy=CIFAR10Policy() if auto_policy else None,
+            norm_values=norm_values,
+            to_tensor=to_tensor,
+        )
+        
+        _sets = {}
+        for _split, _training in zip(['train', 'test'], [True, False]):
+            _sets[_split] = torchvision.datasets.CIFAR10(
+                root=root_path,
+                train=_training,
+                transform=transforms.Compose([
+                    *transform_pre,
+                    *trans[_split],
+                    *transform_post,
+                ]),
+                download=True,
+            )
+        return _sets
+
+
+
+
+
+# %%
+class Datasets:
+    available_datasets = [
+        'stl10',
+        'cifar10',
+        'cifar100',
+    ]
     def __init__(self,
                 dataset='stl10',
                 root_path='/tmp',
@@ -671,37 +761,88 @@ class Datasets:
                 download=True,
                 shuffle=True,
                 num_workers=4,
-                splits=['train', 'test'],
                 limit_train=0,
                 limit_test=0,
                 ds_kwargs={},
+                resize=0,
                 ddp=None,
+                image_size=0,
+                splits=['train', 'test'],
                 ):
-        self.ds_kwargs = {}
+        
+        
+        if dataset == 'stl10':
+            _sets = Datasets_STL10.get_sets(
+                image_size=image_size,
+                root_path=root_path,
+                norm_values=True,
+                to_tensor=True,
+                auto_policy=False,
+                transform_pre=transform_pre,
+                transform_post=transform_post,
+                base_train_trans=True,
+            )
+            _num_labels = Datasets_STL10.num_labels
+        elif dataset == 'cifar10':
+            _sets = Datasets_CIFAR10.get_sets(
+                image_size=image_size,
+                root_path=root_path,
+                norm_values=True,
+                to_tensor=True,
+                auto_policy=False,
+                transform_pre=transform_pre,
+                transform_post=transform_post,
+                base_train_trans=True,
+            )
+            _num_labels = Datasets_CIFAR10.num_labels
+        elif dataset == 'cifar100':
+            _sets = Datasets_CIFAR100.get_sets(
+                image_size=image_size,
+                root_path=root_path,
+                norm_values=True,
+                to_tensor=True,
+                auto_policy=False,
+                transform_pre=transform_pre,
+                transform_post=transform_post,
+                base_train_trans=True,
+            )
+            _num_labels = Datasets_CIFAR100.num_labels
+        else:
+            raise ValueError('dataset [{}] is not supported'.format(dataset))
+        
+        # splits = ['train', 'test']
+        self.data = {
+            _split: {
+                'set_full': _sets[_split],
+                'set': _sets[_split],
+                'loader': None,
+                'limit': [limit_train, limit_test][i],
+                'batch_count': None,
+                'sample_count': None,
+                'bs': 1,
+            }
+            for i, _split in enumerate(splits)
+        }
+        
+        self.num_labels = _num_labels
         self.dataset = str(dataset)
-        self.local_image_folder = None
-        if self.dataset not in self._datasets_config:
-            if os.path.isdir(self.dataset):
-                self.local_image_folder = self.dataset
-                self.dataset = 'local'
-            else:
-                raise ValueError('[ERROR] dataset [{}] is currently not supported!\nUse one of [{}]'.format(
-                    self.dataset,
-                    '|'.join(list(self._datasets_config.values()))
-                ))
         self.root_path = root_path
+        
         self.bs = batchsize
         if isinstance(self.bs, int):
             self.bs = [self.bs for _ in range(len(splits))]
         if isinstance(self.bs, (list, tuple)):
             assert len(self.bs) == len(splits)
+            for v, _split in zip(self.bs, splits):
+                self.data[_split]['bs'] = v
             self.bs = {
                 k: v
                 for v, k in zip(self.bs, splits)
             }
-        self.config = self._datasets_config[self.dataset]
-        self.num_labels = int(self.config['num_labels'])
-        self.sets = {}
+        else:
+            raise ValueError('datasets batchsize')
+        
+        self.sets = _sets
         self.loaders = {}
         self.info = {
             'dataset': self.dataset,
@@ -709,148 +850,53 @@ class Datasets:
             'sample_count': {},
             'num_labels': self.num_labels,
         }
-        self.limits = {
-            'train': limit_train,
-            'test': limit_test,
-        }
+        # self.limits = {
+        #     'train': limit_train,
+        #     'test': limit_test,
+        # }
         self.ddp = ddp
-        for _split in splits:
-            r = self._get_dataset(
-                config=self.config,
-                split=_split,
-                download=bool(download),
-                root_path=self.root_path,
-                shuffle=(shuffle and _split == 'train'),
-                num_workers=num_workers,
-                bs=self.bs[_split],
-                limit=self.limits[_split],
-                ds_kwargs=self.ds_kwargs,
-                ddp=self.ddp,
-                transform_pre=transform_pre,
-                transform_post=transform_post,
-            )
+        for i, _split in enumerate(splits):
+            _set = self.data[_split]['set_full']
+            _limit = self.data[_split]['limit']
+            _bs = self.data[_split]['bs']
             
-            self.sets[_split] = r['set']
-            self.loaders[_split] = r['loader']
-            self.info['batch_count'][_split] = r['batch_count']
-            self.info['sample_count'][_split] = r['sample_count']
-        
-    @classmethod
-    def download_and_prepare(cls, dataset=None, path='./data', ddp=None):
-        if dataset is None:
-            dataset = list(cls._datasets_config.keys())
-        if isinstance(dataset, list):
-            return [cls.download_and_prepare(dataset=v, path=path, ddp=ddp) for v in dataset]
-        if dataset in cls._datasets_config:
-            _config = cls._datasets_config[dataset]
-            for _split in ['train', 'test']:
-                _ = cls._get_dataset(
-                    config=_config,
-                    split='train',
-                    download=True,
-                    root_path=path,
-                    shuffle=False,
-                    num_workers=4,
-                    bs=512,
-                    ddp=ddp,
+            if isinstance(_limit, int) and _limit > 0:
+                _set = torch.utils.data.Subset(_set, torch.arange(_limit))
+            
+            _loader = None
+            if ddp is not None:
+                # set up for distributed learning
+                _sampler = torch.utils.data.DistributedSampler(
+                    _set,
+                    num_replicas=ddp['size'],
+                    rank=ddp['rank'],
+                    shuffle=shuffle,
                 )
-                del _
-            return True
-        else:
-            print('Skipped [{}], not supported'.format(dataset))
-    
-    @classmethod
-    def _get_ds_kwargs(cls,
-                transform=[],
-                norm_values=None,
-                download=True,
-                **kwargs,
-                ):
-        
-        if transform is None:
-            transform = []
-        
-        _norms = []
-        if norm_values is None:
-            # _norms = [transforms.Normalize({
-            #     'mean': [0.5, 0.5, 0.5],
-            #     'std': [0.25, 0.25, 0.25],
-            # })]
-            pass
-        else:
-            _norms = [transforms.Normalize(**norm_values)]
-        
-        _ds_kwargs = {
-            **kwargs,
-            'transform': transforms.Compose([
-                *transform,
-                *_norms,
-            ]),
-        }
-        return _ds_kwargs
-    
-    @classmethod
-    def _get_dataset(cls,
-                config,
-                split,
-                download,
-                root_path,
-                shuffle=False,
-                num_workers=4,
-                bs=128,
-                limit=0,
-                ddp=None,
-                ds_kwargs={},
-                transform_pre=[],
-                transform_post=[],
-                ):
-        _ds_kwargs = cls._get_ds_kwargs(
-            transform=[
-                *transform_pre,
-                *config['transform'][split],
-                *transform_post,
-            ],
-            norm_values=config.get('norm_values', None),
-            download=download,
-            root=root_path,
-            **config['split'][split],
-            **ds_kwargs,
-        )
-        _set = config['dataset_fn'](**_ds_kwargs)
-        
-        if isinstance(limit, int) and limit > 0:
-            _set = torch.utils.data.Subset(_set, torch.arange(limit))
-        
-        if ddp is not None:
-            # set up for distributed learning
-            _sampler = torch.utils.data.DistributedSampler(
-                _set,
-                num_replicas=ddp['size'],
-                rank=ddp['rank'],
-                shuffle=shuffle,
-            )
-            _loader = torch.utils.data.DataLoader(
-                _set, sampler=_sampler,
-                batch_size=bs,
-                num_workers=num_workers,
-                pin_memory=True,
-                drop_last=False,
-            )
-        else:
-            _loader = torch.utils.data.DataLoader(
-                _set,
-                batch_size=bs,
-                shuffle=bool(shuffle),
-                num_workers=num_workers,
-            )
-        _batch_count = len(_loader)
-        _sample_count = len(_set)
-        return {
-            'set': _set,
-            'loader': _loader,
-            'batch_count': _batch_count,
-            'sample_count': _sample_count,
-        }
+                _loader = torch.utils.data.DataLoader(
+                    _set,
+                    sampler=_sampler,
+                    batch_size=_bs,
+                    num_workers=num_workers,
+                    pin_memory=True,
+                    drop_last=False,
+                )
+            else:
+                _loader = torch.utils.data.DataLoader(
+                    _set,
+                    batch_size=_bs,
+                    shuffle=bool(shuffle) and _split == 'train',
+                    num_workers=num_workers,
+                )
+            self.data[_split]['batch_count'] = len(_loader)
+            self.data[_split]['sample_count'] = len(_set)
+            self.data[_split]['set'] = _set
+            self.data[_split]['loader'] = _loader
+            
+            self.sets[_split] = self.data[_split]['set']
+            self.loaders[_split] = self.data[_split]['loader']
+            self.info['batch_count'][_split] = self.data[_split]['batch_count']
+            self.info['sample_count'][_split] = self.data[_split]['sample_count']
+
 
 # %%
 class LocalDatasets:

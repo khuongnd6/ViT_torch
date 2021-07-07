@@ -45,7 +45,10 @@ class ARGS:
                 _type = v[2]
                 # print(_keys, _value, type(_value), _type)
                 # print(config)
-                assert isinstance(_value, _type), 'arg `{}` must be of type <{}>, got {}'.format(_keys[0], v[2], _value)
+                if _type is bool:
+                    _value = bool(_value)
+                if not isinstance(_value, list):
+                    assert isinstance(_value, _type), 'arg `{}` must be of type <{}>, got {}'.format(_keys[0], v[2], _value)
             if len(v) >= 4:
                 _set = v[3]
                 if isinstance(_set, (list, tuple, set)):
@@ -81,7 +84,7 @@ class ARGS:
         _config_indices = {}
         self._parser = argparse.ArgumentParser(name)
         for i, v in enumerate(self._config):
-            _kwargs_add = {}
+            _kwargs = {}
             _keys = [v[0]]
             if isinstance(v[0], (list, tuple)):
                 _keys = list(v[0])
@@ -92,18 +95,25 @@ class ARGS:
             elif len(v) == 2:
                 _type = type(_value)
             if _type is bool:
-                _kwargs_add['nargs'] = '?'
+                if bool(_value):
+                    _kwargs['action'] = 'store_false'
+                else:
+                    _kwargs['action'] = 'store_true'
+            else:
+                _kwargs['type'] = _type
+            if type(_value) == list:
+                _kwargs['nargs'] = '+'
             self._parser.add_argument(
                 *['--{}'.format(_key) for _key in _keys],
                 default=_value,
-                type=_type,
                 help=v[3] if len(v) >= 4 else None,
-                **_kwargs_add,
+                **_kwargs,
             )
             for _key in _keys:
                 _config_indices[_key] = i
         
         _args = self._parser.parse_args()
+        self.parsed_args = _args
         
         _config_parsed = [list(v) for v in self._config]
         for _key, _index in _config_indices.items():

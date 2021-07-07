@@ -3,12 +3,18 @@ from numpy.lib.arraysetops import isin
 import torch
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
-import numpy as np
 import random
 from torch._C import Value
 import torchvision
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
+import os
+import time
 # from utils_datasets import Cutout, CIFAR10Policy, ImageNetPolicy
+
+# %%
+from skimage.feature import local_binary_pattern
+import cv2
 
 # %%
 class Cutout(object):
@@ -157,6 +163,59 @@ class CIFAR10Policy(object):
         return "AutoAugment CIFAR10 Policy"
 
 
+class STL10Policy(object):
+    """ Randomly choose one of the best 25 Sub-policies on ImageNet.
+        Example:
+        >>> policy = STL10Policy()
+        >>> transformed = policy(image)
+        Example as a PyTorch Transform:
+        >>> transform=transforms.Compose([
+        >>>     transforms.Resize(256),
+        >>>     STL10Policy(),
+        >>>     transforms.ToTensor()])
+    """
+    def __init__(self, fillcolor=(128, 128, 128)):
+        self.policies = [
+            SubPolicy(0.4, "posterize", 8, 0.6, "rotate", 9, fillcolor),
+            SubPolicy(0.6, "solarize", 5, 0.6, "autocontrast", 5, fillcolor),
+            SubPolicy(0.8, "equalize", 8, 0.6, "equalize", 3, fillcolor),
+            SubPolicy(0.6, "posterize", 7, 0.6, "posterize", 6, fillcolor),
+            SubPolicy(0.4, "equalize", 7, 0.2, "solarize", 4, fillcolor),
+
+            SubPolicy(0.4, "equalize", 4, 0.8, "rotate", 8, fillcolor),
+            SubPolicy(0.6, "solarize", 3, 0.6, "equalize", 7, fillcolor),
+            SubPolicy(0.8, "posterize", 5, 1.0, "equalize", 2, fillcolor),
+            SubPolicy(0.2, "rotate", 3, 0.6, "solarize", 8, fillcolor),
+            SubPolicy(0.6, "equalize", 8, 0.4, "posterize", 6, fillcolor),
+
+            SubPolicy(0.8, "rotate", 8, 0.4, "color", 0, fillcolor),
+            SubPolicy(0.4, "rotate", 9, 0.6, "equalize", 2, fillcolor),
+            SubPolicy(0.0, "equalize", 7, 0.8, "equalize", 8, fillcolor),
+            SubPolicy(0.6, "invert", 4, 1.0, "equalize", 8, fillcolor),
+            SubPolicy(0.6, "color", 4, 1.0, "contrast", 8, fillcolor),
+
+            SubPolicy(0.8, "rotate", 8, 1.0, "color", 2, fillcolor),
+            SubPolicy(0.8, "color", 8, 0.8, "solarize", 7, fillcolor),
+            SubPolicy(0.4, "sharpness", 7, 0.6, "invert", 8, fillcolor),
+            SubPolicy(0.6, "shearX", 5, 1.0, "equalize", 9, fillcolor),
+            SubPolicy(0.4, "color", 0, 0.6, "equalize", 3, fillcolor),
+
+            SubPolicy(0.4, "equalize", 7, 0.2, "solarize", 4, fillcolor),
+            SubPolicy(0.6, "solarize", 5, 0.6, "autocontrast", 5, fillcolor),
+            SubPolicy(0.6, "invert", 4, 1.0, "equalize", 8, fillcolor),
+            SubPolicy(0.6, "color", 4, 1.0, "contrast", 8, fillcolor),
+            SubPolicy(0.8, "equalize", 8, 0.6, "equalize", 3, fillcolor)
+        ]
+
+
+    def __call__(self, img):
+        policy_idx = random.randint(0, len(self.policies) - 1)
+        return self.policies[policy_idx](img)
+
+    def __repr__(self):
+        return "AutoAugment STL10 Policy"
+
+
 class SVHNPolicy(object):
     """ Randomly choose one of the best 25 Sub-policies on SVHN.
         Example:
@@ -229,11 +288,6 @@ class SubPolicy(object):
             "invert": [0] * 10
         }
 
-        # from https://stackoverflow.com/questions/5252170/specify-image-filling-color-when-rotating-in-python-with-pil-and-setting-expand
-        def rotate_with_fill(img, magnitude):
-            rot = img.convert("RGBA").rotate(magnitude)
-            return Image.composite(rot, Image.new("RGBA", rot.size, (128,) * 4), rot).convert(img.mode)
-
         func = {
             "shearX": lambda img, magnitude: img.transform(
                 img.size, Image.AFFINE, (1, magnitude * random.choice([-1, 1]), 0, 0, 1, 0),
@@ -247,7 +301,7 @@ class SubPolicy(object):
             "translateY": lambda img, magnitude: img.transform(
                 img.size, Image.AFFINE, (1, 0, 0, 0, 1, magnitude * img.size[1] * random.choice([-1, 1])),
                 fillcolor=fillcolor),
-            "rotate": lambda img, magnitude: rotate_with_fill(img, magnitude),
+            "rotate": lambda img, magnitude: self._rotate_with_fill(img, magnitude),
             "color": lambda img, magnitude: ImageEnhance.Color(img).enhance(1 + magnitude * random.choice([-1, 1])),
             "posterize": lambda img, magnitude: ImageOps.posterize(img, magnitude),
             "solarize": lambda img, magnitude: ImageOps.solarize(img, magnitude),
@@ -269,6 +323,12 @@ class SubPolicy(object):
         self.operation2 = func[operation2]
         self.magnitude2 = ranges[operation2][magnitude_idx2]
 
+    # from https://stackoverflow.com/questions/5252170/specify-image-filling-color-when-rotating-in-python-with-pil-and-setting-expand
+    @classmethod
+    def _rotate_with_fill(cls, img, magnitude):
+        rot = img.convert("RGBA").rotate(magnitude)
+        return Image.composite(rot, Image.new("RGBA", rot.size, (128,) * 4), rot).convert(img.mode)
+
 
     def __call__(self, img):
         if random.random() < self.p1: img = self.operation1(img, self.magnitude1)
@@ -277,19 +337,247 @@ class SubPolicy(object):
 
 
 # %%
+class CustomRepresentations(torch.utils.data.Dataset):
+    """Custom frozen image representations dataset."""
+
+    def __init__(self,
+                reprs=None,
+                labels=None,
+                transform=None,
+                **kwargs):
+        """
+        Args:
+        """
+        self.transform = transform
+        self.reprs = reprs
+        self.labels = labels
+        
+    def __len__(self):
+        return len(self.reprs)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        
+        
+        _repr = self.reprs[idx]
+        _label = self.labels[idx]
+        if self.transform:
+            sample = [self.transform(transforms.ToPILImage(_repr)), _label]
+        else:
+            sample = [_repr, _label]
+        
+        
+        # img_name = os.path.join(self.root_dir,
+        #                         self.landmarks_frame.iloc[idx, 0])
+        # image = io.imread(img_name)
+        # landmarks = self.landmarks_frame.iloc[idx, 1:]
+        # landmarks = np.array([landmarks])
+        # landmarks = landmarks.astype('float').reshape(-1, 2)
+        # sample = {'image': image, 'landmarks': landmarks}
+
+        return sample
+
+class CustomPostProcessDatasets:
+    def __init__(self,
+                train_reprs=None,
+                train_labels=None,
+                test_reprs=None,
+                test_labels=None,
+                splits=['train', 'test'],
+                limit_train=0,
+                limit_test=0,
+                num_workers=4,
+                shuffle=False,
+                bs=128,
+                transform=[],
+                norm_values=None,
+                num_labels=5,
+                ):
+        self.num_labels = num_labels
+        self.info = {
+            'batch_count': {},
+            'sample_count': {},
+        }
+        self.sets = {}
+        self.loaders = {}
+        norm_transform = []
+        if norm_values:
+            norm_transform = [transforms.Normalize(**norm_values)]
+        for _split in splits:
+            data_kwargs = {
+                'train': {
+                    'reprs': train_reprs,
+                    'labels': train_labels,
+                },
+                'test': {
+                    'reprs': test_reprs,
+                    'labels': test_labels,
+                },
+            }
+            _set = CustomRepresentations(
+                **data_kwargs.get(_split, {}),
+                transform=transforms.Compose([
+                    *transform,
+                    transforms.ToTensor(),
+                    *norm_transform,
+                ])
+            )
+            _limit = {
+                'train': limit_train,
+                'test': limit_test,
+            }[_split]
+            if isinstance(_limit, int) and _limit > 0:
+                _set = torch.utils.data.Subset(_set, torch.arange(_limit))
+            
+            self.bs = bs
+            _loader = torch.utils.data.DataLoader(
+                _set,
+                batch_size=bs,
+                shuffle=bool(shuffle) and _split=='train',
+                num_workers=num_workers,
+            )
+            _batch_count = len(_loader)
+            _sample_count = len(_set)
+            self.sets[_split] = _set
+            self.loaders[_split] = _loader
+            self.info['batch_count'][_split] = _batch_count
+            self.info['sample_count'][_split] = _sample_count
+
+
+# %%
+class CustomFrozenRepresentations(torch.utils.data.Dataset):
+    """Custom frozen image representations dataset."""
+
+    def __init__(self,
+                reprs=None,
+                labels=None,
+                # transform=None,
+                **kwargs):
+        """
+        Args:
+        """
+        # self.transform = transform
+        self.reprs = reprs
+        self.labels = labels
+        
+    def __len__(self):
+        return len(self.reprs)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        
+        
+        _repr = self.reprs[idx]
+        _label = self.labels[idx]
+        sample = [_repr, _label]
+        
+        
+        # img_name = os.path.join(self.root_dir,
+        #                         self.landmarks_frame.iloc[idx, 0])
+        # image = io.imread(img_name)
+        # landmarks = self.landmarks_frame.iloc[idx, 1:]
+        # landmarks = np.array([landmarks])
+        # landmarks = landmarks.astype('float').reshape(-1, 2)
+        # sample = {'image': image, 'landmarks': landmarks}
+        # if self.transform:
+        #     sample = self.transform(sample)
+
+        return sample
+
+class CustomFrozenDatasets:
+    def __init__(self,
+                train_reprs=None,
+                train_labels=None,
+                test_reprs=None,
+                test_labels=None,
+                splits=['train', 'test'],
+                limit=0,
+                num_workers=4,
+                shuffle=False,
+                bs=128,
+                ):
+        self.info = {
+            'batch_count': {},
+            'sample_count': {},
+        }
+        self.sets = {}
+        self.loaders = {}
+        for _split in splits:
+            data_kwargs = {
+                'train': {
+                    'reprs': train_reprs,
+                    'labels': train_labels,
+                },
+                'test': {
+                    'reprs': test_reprs,
+                    'labels': test_labels,
+                },
+            }
+            _set = CustomFrozenRepresentations(
+                **data_kwargs.get(_split, {})
+            )
+            if isinstance(limit, int) and limit > 0:
+                _set = torch.utils.data.Subset(_set, torch.arange(limit))
+            
+            self.bs = bs
+            _loader = torch.utils.data.DataLoader(
+                _set,
+                batch_size=bs,
+                shuffle=bool(shuffle) and _split=='train',
+                num_workers=num_workers,
+            )
+            _batch_count = len(_loader)
+            _sample_count = len(_set)
+            self.sets[_split] = _set
+            self.loaders[_split] = _loader
+            self.info['batch_count'][_split] = _batch_count
+            self.info['sample_count'][_split] = _sample_count
+
+
+# %%
 class Datasets:
     _datasets_config = {
+        # 'local': {
+        #     'dataset_fn': torchvision.datasets.ImageFolder,
+        #     'norm_values': {
+        #         # 'mean': [0.44671062065972217, 0.43980983983523964, 0.40664644709967324],
+        #         # 'std': [0.2603409782662331, 0.25657727311344447, 0.27126738145225493],
+        #         'mean': [0.5, 0.5, 0.5],
+        #         'std': [0.25, 0.25, 0.25],
+        #     },
+        #     # 'num_labels': 10,
+        #     'transform': {
+        #         'train': [
+        #             # transforms.RandomCrop(96, padding=8, fill=128),
+        #             transforms.RandomHorizontalFlip(),
+        #             # STL10Policy(),
+        #             transforms.ToTensor(),
+        #         ],
+        #         'test': [
+        #             transforms.ToTensor(),
+        #         ],
+        #     },
+        #     'split': {
+        #         'train': {},
+        #         'test': {},
+        #     },
+        # },
         'stl10': {
             'dataset_fn': torchvision.datasets.STL10,
             'norm_values': {
                 'mean': [0.44671062065972217, 0.43980983983523964, 0.40664644709967324],
                 'std': [0.2603409782662331, 0.25657727311344447, 0.27126738145225493],
+                # 'mean': [0.5, 0.5, 0.5],
+                # 'std': [0.25, 0.25, 0.25],
             },
             'num_labels': 10,
             'transform': {
                 'train': [
-                    transforms.RandomCrop(96, padding=4, fill=128), # fill parameter needs torchvision installed from source
+                    transforms.RandomCrop(96, padding=8, fill=128),
                     transforms.RandomHorizontalFlip(),
+                    # STL10Policy(),
                     transforms.ToTensor(),
                 ],
                 'test': [
@@ -311,7 +599,7 @@ class Datasets:
             'num_labels': 10,
             'transform': {
                 'train': [
-                    transforms.RandomCrop(32, padding=4, fill=128), # fill parameter needs torchvision installed from source
+                    transforms.RandomCrop(32, padding=4, fill=128),
                     transforms.RandomHorizontalFlip(),
                     CIFAR10Policy(),
                     transforms.ToTensor(),
@@ -335,11 +623,11 @@ class Datasets:
             'num_labels': 100,
             'transform': {
                 'train': [
-                    transforms.RandomCrop(32, padding=4, fill=128), # fill parameter needs torchvision installed from source
+                    transforms.RandomCrop(32, padding=4, fill=128),
                     transforms.RandomHorizontalFlip(),
                     CIFAR10Policy(),
                     transforms.ToTensor(),
-                    Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
+                    # Cutout(n_holes=1, length=16), # (https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py)
                 ],
                 'test': [
                     transforms.ToTensor(),
@@ -376,22 +664,31 @@ class Datasets:
     
     def __init__(self,
                 dataset='stl10',
-                root_path=None,
+                root_path='/tmp',
                 batchsize=128,
-                transform=[],
+                transform_pre=[],
+                transform_post=[],
                 download=True,
                 shuffle=True,
                 num_workers=4,
                 splits=['train', 'test'],
                 limit_train=0,
                 limit_test=0,
+                ds_kwargs={},
+                ddp=None,
                 ):
-        self.dataset = str(dataset).lower()
+        self.ds_kwargs = {}
+        self.dataset = str(dataset)
+        self.local_image_folder = None
         if self.dataset not in self._datasets_config:
-            raise ValueError('[ERROR] dataset [{}] is currently not supported!\nUse one of [{}]'.format(
-                self.dataset,
-                '|'.join(list(self._datasets_config.values()))
-            ))
+            if os.path.isdir(self.dataset):
+                self.local_image_folder = self.dataset
+                self.dataset = 'local'
+            else:
+                raise ValueError('[ERROR] dataset [{}] is currently not supported!\nUse one of [{}]'.format(
+                    self.dataset,
+                    '|'.join(list(self._datasets_config.values()))
+                ))
         self.root_path = root_path
         self.bs = batchsize
         if isinstance(self.bs, int):
@@ -416,25 +713,8 @@ class Datasets:
             'train': limit_train,
             'test': limit_test,
         }
+        self.ddp = ddp
         for _split in splits:
-            # _ds_kwargs = self._get_ds_kwargs(
-            #     transform=self.config['transform'][_split],
-            #     norm_values=self.config['norm_values'],
-            #     download=self.download,
-            #     root=self.root_path,
-            #     **self.config['split'][_split],
-            # )
-            # _set = self.config['dataset_fn'](**_ds_kwargs)
-            # _loader = torch.utils.data.DataLoader(
-            #     _set,
-            #     batch_size=self.bs[_split],
-            #     shuffle=bool(shuffle),
-            #     num_workers=num_workers,
-            # )
-            # _batch_count = len(_loader)
-            # _sample_count = len(_set)
-            
-            
             r = self._get_dataset(
                 config=self.config,
                 split=_split,
@@ -444,6 +724,10 @@ class Datasets:
                 num_workers=num_workers,
                 bs=self.bs[_split],
                 limit=self.limits[_split],
+                ds_kwargs=self.ds_kwargs,
+                ddp=self.ddp,
+                transform_pre=transform_pre,
+                transform_post=transform_post,
             )
             
             self.sets[_split] = r['set']
@@ -452,11 +736,11 @@ class Datasets:
             self.info['sample_count'][_split] = r['sample_count']
         
     @classmethod
-    def download_and_prepare(cls, dataset=None, path='./data'):
+    def download_and_prepare(cls, dataset=None, path='./data', ddp=None):
         if dataset is None:
             dataset = list(cls._datasets_config.keys())
         if isinstance(dataset, list):
-            return [cls.download_and_prepare(v) for v in dataset]
+            return [cls.download_and_prepare(dataset=v, path=path, ddp=ddp) for v in dataset]
         if dataset in cls._datasets_config:
             _config = cls._datasets_config[dataset]
             for _split in ['train', 'test']:
@@ -468,6 +752,7 @@ class Datasets:
                     shuffle=False,
                     num_workers=4,
                     bs=512,
+                    ddp=ddp,
                 )
                 del _
             return True
@@ -476,7 +761,7 @@ class Datasets:
     
     @classmethod
     def _get_ds_kwargs(cls,
-                transform=[transforms.ToTensor()],
+                transform=[],
                 norm_values=None,
                 download=True,
                 **kwargs,
@@ -485,40 +770,79 @@ class Datasets:
         if transform is None:
             transform = []
         
+        _norms = []
         if norm_values is None:
-            norm_values = {
-                'mean': [0.5, 0.5, 0.5],
-                'std': [0.5, 0.5, 0.5],
-            }
+            # _norms = [transforms.Normalize({
+            #     'mean': [0.5, 0.5, 0.5],
+            #     'std': [0.25, 0.25, 0.25],
+            # })]
+            pass
+        else:
+            _norms = [transforms.Normalize(**norm_values)]
         
         _ds_kwargs = {
             **kwargs,
             'transform': transforms.Compose([
                 *transform,
-                transforms.Normalize(**norm_values),
+                *_norms,
             ]),
         }
         return _ds_kwargs
     
     @classmethod
-    def _get_dataset(cls, config, split, download, root_path, shuffle, num_workers=4, bs=128, limit=0):
+    def _get_dataset(cls,
+                config,
+                split,
+                download,
+                root_path,
+                shuffle=False,
+                num_workers=4,
+                bs=128,
+                limit=0,
+                ddp=None,
+                ds_kwargs={},
+                transform_pre=[],
+                transform_post=[],
+                ):
         _ds_kwargs = cls._get_ds_kwargs(
-            transform=config['transform'][split],
-            norm_values=config['norm_values'],
+            transform=[
+                *transform_pre,
+                *config['transform'][split],
+                *transform_post,
+            ],
+            norm_values=config.get('norm_values', None),
             download=download,
             root=root_path,
             **config['split'][split],
+            **ds_kwargs,
         )
         _set = config['dataset_fn'](**_ds_kwargs)
         
         if isinstance(limit, int) and limit > 0:
             _set = torch.utils.data.Subset(_set, torch.arange(limit))
-        _loader = torch.utils.data.DataLoader(
-            _set,
-            batch_size=bs,
-            shuffle=bool(shuffle),
-            num_workers=num_workers,
-        )
+        
+        if ddp is not None:
+            # set up for distributed learning
+            _sampler = torch.utils.data.DistributedSampler(
+                _set,
+                num_replicas=ddp['size'],
+                rank=ddp['rank'],
+                shuffle=shuffle,
+            )
+            _loader = torch.utils.data.DataLoader(
+                _set, sampler=_sampler,
+                batch_size=bs,
+                num_workers=num_workers,
+                pin_memory=True,
+                drop_last=False,
+            )
+        else:
+            _loader = torch.utils.data.DataLoader(
+                _set,
+                batch_size=bs,
+                shuffle=bool(shuffle),
+                num_workers=num_workers,
+            )
         _batch_count = len(_loader)
         _sample_count = len(_set)
         return {
@@ -527,6 +851,376 @@ class Datasets:
             'batch_count': _batch_count,
             'sample_count': _sample_count,
         }
+
+# %%
+class LocalDatasets:
+    def __init__(self,
+                dataset='tire',
+                path='/host/ubuntu/torch/tire/tire_500',
+                batchsize=128,
+                transform_fns=[],
+                transform_fns_train=[],
+                transform_fns_test=[],
+                transform_fns_post=[
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.25, 0.25, 0.25]),
+                ],
+                shuffle=True,
+                num_workers=4,
+                # splits=['train', 'test'],
+                train_ratio=0.8,
+                limit=0,
+                # limit_train=0,
+                # limit_test=0,
+                num_labels=5,
+                # ds_kwargs={},
+                # ddp=None,
+                ):
+        splits = ['train', 'test']
+        self.dataset = dataset
+        self.num_labels = int(num_labels)
+        self.bs = batchsize
+        self.sets = {}
+        self.loaders = {}
+        self.info = {
+            'dataset': self.dataset,
+            'batch_count': {},
+            'sample_count': {},
+            'num_labels': self.num_labels,
+        }
+        # self.limits = {
+        #     'train': limit_train,
+        #     'test': limit_test,
+        # }
+        
+        
+        norm_values = {
+            'mean': [0.5, 0.5, 0.5],
+            'std': [0.25, 0.25, 0.25],
+        }
+        transform_dict = {
+            k: transforms.Compose([
+                *transform_fns,
+                *fns,
+                *transform_fns_post,
+                # transforms.Resize(255),
+                # transforms.CenterCrop(224),
+            ])
+            for k, fns in zip(['train', 'test'], [transform_fns_train, transform_fns_test])
+        }
+        self.path = path
+        assert os.path.isdir(self.path)
+        ds_full = {
+            _split: torchvision.datasets.ImageFolder(
+                self.path,
+                transform=transform_dict[_split],
+            )
+            for _split in splits
+        }
+        ds = {}
+        for _split in splits:
+            ds[_split] = ds_full[_split]
+        loader = torch.utils.data.DataLoader(
+            ds_full['train'],
+            batch_size=1,
+            num_workers=num_workers,
+            pin_memory=False,
+            drop_last=False,
+            shuffle=False,
+        )
+
+        # print('found {} images, onto {} batches'.format(len(ds), len(loader)))
+        # _shapes = []
+        
+        _labels = []
+        for i, data in enumerate(loader):
+            images, labels = data
+            # _shapes.append(list(images.shape))
+            _labels_new = list(labels.tolist())
+            _labels.extend(_labels_new)
+        
+        _total_count = len(_labels)
+        _limit_ratio = 1.0
+        if isinstance(limit, int) and limit > 0:
+            _limit_ratio = min(1.0, limit / _total_count)
+        
+        # label_agg = {}
+        label_idx = {}
+        for i, _label in enumerate(_labels):
+            if _label not in label_idx:
+                label_idx[_label] = []
+            label_idx[_label].append(i)
+            # if _label not in label_agg:
+            #     label_agg[_label] = 0
+            # label_agg[_label] += 1
+
+        label_idx
+        
+        label_idx_split = {
+            'train': {},
+            'test': {},
+        }
+        self.train_ratio = float(min(1, max(0, train_ratio)))
+        self.count = {'train': 0, 'test': 0}
+        for k, v in label_idx.items():
+            _limited_len = len(v) * _limit_ratio
+            _train_count = int(np.floor(_limited_len * self.train_ratio))
+            _test_count = int(np.floor(_limited_len)) - _train_count
+            
+            # print('class [{}] count [{}] train [{}]'.format(k, len(v), _train_count))
+            label_idx_split['train'][k] = v[ : _train_count]
+            label_idx_split['test'][k] = v[_train_count: _train_count + _test_count]
+            self.count['train'] += len(label_idx_split['train'][k])
+            self.count['test'] += len(label_idx_split['test'][k])
+        label_idx_split
+        
+        split_idx = {
+            k: [
+                v2
+                for v1 in v.values()
+                for v2 in v1
+            ]
+            for k, v in label_idx_split.items()
+        }
+        # np.array(split_idx['train'])
+        # np.array(split_idx['val'])
+        
+        samplers = {
+            k: torch.utils.data.SubsetRandomSampler(indices=v)
+            for k, v in split_idx.items()
+        }
+        self.samplers = samplers
+        
+        loaders = {
+            _split: torch.utils.data.DataLoader(
+                ds[_split],
+                sampler=_sampler,
+                batch_size=self.bs,
+                num_workers=num_workers,
+                pin_memory=False,
+                drop_last=False,
+            )
+            for _split, _sampler in samplers.items()
+        }
+        loaders
+        
+        for _split in splits:
+            # if isinstance(limit, int) and limit > 0:
+            #     _set = torch.utils.data.Subset(_set, torch.arange(limit))
+            self.sets[_split] = ds[_split]
+            self.loaders[_split] = loaders[_split]
+            self.info['batch_count'][_split] = len(loaders[_split])
+            self.info['sample_count'][_split] = self.count[_split]
+    
+
+
+# %%
+class TRANS:
+    
+    lbp_methods = [
+        'default',
+        'ror',
+        'uniform',
+        'nri_uniform',
+        # 'var',
+    ]
+    @classmethod
+    def _lbp_uniform(cls, x):
+        radius = 2
+        n_points = 8 * radius
+        METHOD = 'uniform'
+        imgUMat = np.float32(x)
+        gray = cv2.cvtColor(imgUMat, cv2.COLOR_RGB2GRAY)
+        lbp = local_binary_pattern(gray, n_points, radius, METHOD)
+        lbp = torch.from_numpy(lbp).float()
+        return lbp
+    
+    @classmethod
+    def _lbp_full3(cls, x, radius):
+        n_points = 8 * radius
+        METHOD = 'uniform'
+        imgUMat = np.float32(x)
+        gray = cv2.cvtColor(imgUMat, cv2.COLOR_RGB2GRAY)
+        lbp = local_binary_pattern(gray, n_points, radius, '')
+        return lbp
+    
+    @classmethod
+    def get_lbp_full(cls, img, radius=1, point_mult=8, methods=None):
+        if isinstance(img, Image.Image):
+            if img.mode != 'L':
+                return cls.get_lbp_full(np.array(img.convert('L')), radius, point_mult, methods)
+            return cls.get_lbp_full(np.array(img), radius, point_mult, methods)
+        if not isinstance(img, np.ndarray):
+            raise ValueError('`img` must be of type [ numpy.ndarray | PIL.Image.Image ]')
+        if len(img.shape) != 2 or np.prod(img.shape) <= 0:
+            return cls.get_lbp_full(Image.fromarray(img).convert('L'), radius, point_mult, methods)
+            # raise ValueError('`img` must be a non-empty rank-2 numpy array (gray-scale image)')
+        if methods is None:
+            methods = [*cls.lbp_methods]
+        if isinstance(methods, str):
+            methods = [methods]
+        _n_points = min(point_mult * radius, 24)
+        r = {}
+        for _method in methods:
+            _range = [0, 255]
+            if _method == 'default':
+                _range = [0, 2 ** _n_points - 1]
+            elif _method == 'ror':
+                _range = [0, 2 ** _n_points - 1]
+            elif _method == 'uniform':
+                _range = [0, _n_points + 1]
+            elif _method == 'nri_uniform':
+                _range = [0, (_n_points + 1) * _n_points]
+            # if _method == 'var':
+            #     img_lbp = img_lbp / (2 ** _n_points) * 255
+            # elif _method == 'original':
+            #     r[_method] = img
+            #     continue
+            else:
+                continue
+                # raise NotImplementedError('method [{}] has not been implemented (internal error)'.format(_method))
+            img_lbp = local_binary_pattern(img, _n_points, radius, _method)
+            img_lbp = (img_lbp - _range[0]) / (_range[1] - _range[0]) * 255
+            img_lbp = np.clip(img_lbp, 0, 255).astype(np.uint8)
+            # print('default in [0~{})'.format(np.max(img_lbp)))
+            # fig = px.histogram(img_lbp.reshape(-1)[np.all([img_lbp.reshape(-1) > 0, img_lbp.reshape(-1) < 255], axis=0)], nbins=256)
+            # fig.show()
+            r[_method] = img_lbp
+        return r
+    
+    @classmethod
+    def get_lbp_merge(cls, img, radius=1, point_mult=8, methods=['l', 'default', 'uniform']):
+        assert isinstance(methods, (list, tuple))
+        # assert len(methods) == 3
+        assert all([v in [*cls.lbp_methods, 'l', 'r', 'g', 'b'] for v in methods])
+        if isinstance(img, Image.Image):
+            return cls.get_lbp_merge(np.array(img), radius, point_mult, methods)
+        if not isinstance(img, np.ndarray):
+            raise ValueError('`img` must be of type [ numpy.ndarray | PIL.Image.Image ]')
+        # if len(img.shape) != 2 or np.prod(img.shape) <= 0:
+        #     raise ValueError('`img` must be a non-empty rank-2 numpy array (gray-scale image)')
+        # _img_np = np.array(img_raw_L.resize([1000, 1000], Image.BICUBIC))
+        _channel = len(methods)
+        _shape = list(img.shape)[:2]
+        imgs_lbp = cls.get_lbp_full(img, radius, point_mult, methods=methods)
+        
+        img_merge_rgb = np.zeros([*_shape, _channel], np.uint8)
+        for i, _method in enumerate(methods):
+            if _method in cls.lbp_methods:
+                img_merge_rgb[:, :, i] = imgs_lbp[_method]
+            else:
+                if len(img.shape) == 3:
+                    assert img.shape[2] == 3
+                    # img is RGB
+                    if _method in ['l']:
+                        img_merge_rgb[:, :, i] = np.array(Image.fromarray(img).convert('L'))
+                    
+                    for j, c in enumerate(['r', 'g', 'b']):
+                        if _method == c:
+                            img_merge_rgb[:, :, i] = np.array(img[:, :, j])
+                            break
+                elif len(img.shape) == 2:
+                    # img is L
+                    if _method in ['l', 'r', 'g', 'b']:
+                        img_merge_rgb[:, :, i] = np.array(img)
+                else:
+                    raise ValueError('image shape [{}] not supported'.format(img.shape))
+        
+        # Image.fromarray(img_merge_rgb)
+        return img_merge_rgb
+    
+    @classmethod
+    def lbp_merge(cls, radius=1, point_mult=8, methods=['l', 'default', 'uniform']):
+        return transforms.Lambda(lambda img: cls.get_lbp_merge(
+            img,
+            radius=radius,
+            point_mult=point_mult,
+            methods=methods,
+        ))
+        # return transforms.Lambda(lambda img: Image.fromarray(cls.get_lbp_merge(
+        #     img,
+        #     radius=radius,
+        #     point_mult=point_mult,
+        #     methods=methods,
+        # )))
+    
+    
+    @classmethod
+    def get_fit_to(cls, img, shape=1000, fill=0, interpolation=Image.BICUBIC):
+        if isinstance(shape, int):
+            assert shape > 0
+            shape = [shape, shape]
+        _size = img.size
+        # assert len(_size) in [2, 3]
+        # _channel = None
+        _shape = _size[:2]
+        # print(img.size, shape, fill)
+        if img.mode in ['RGB', 'L']:
+            img2 = Image.new(img.mode, shape, fill)
+        else:
+            raise ValueError('img must have be rank 2 or 3')
+        shape_r = [int(v * v0 / max(_shape)) for v, v0 in zip(shape, _shape)]
+        img_r = img.resize(shape_r, resample=interpolation)
+        img2.paste(
+            img_r,
+            [
+                int(np.ceil((a - b) / 2))
+                for a, b in zip(shape, list(shape_r))
+            ],
+        )
+        return img2
+    
+    @classmethod
+    def fit_to(cls, shape=1000, fill=0, interpolation=Image.BICUBIC):
+        return transforms.Lambda(lambda img: cls.get_fit_to(
+            img,
+            shape=shape,
+            fill=fill,
+            interpolation=interpolation,
+        ))
+    
+    @classmethod
+    def get_pad_to(cls, img, shape=1000, fill=0):
+        if isinstance(shape, int):
+            assert shape > 0
+            shape = [shape, shape]
+        _size = img.size
+        assert len(_size) in [2, 3]
+        _channel = None
+        _shape = _size[:2]
+        if len(_size) >= 3:
+            # _channel = _size[2]
+            # assert _channel == 3
+            img2 = Image.new('RGB', _shape, fill)
+        else:
+            img2 = Image.new('L', _shape, fill)
+        img2.paste(
+            img,
+            [
+                int(np.ceil((a - b) / 2))
+                for a, b in zip(shape, list(_shape))
+            ],
+        )
+        return img2
+    
+    @classmethod
+    def pad_to(cls, shape=1000, fill=0):
+        return transforms.Lambda(lambda img: cls.get_pad_to(
+            img,
+            shape=shape,
+            fill=fill,
+        ))
+
+
+class SquarePad:
+	def __call__(self, image):
+		w, h = image.size
+		max_wh = np.max([w, h])
+		hp = int((max_wh - w) / 2)
+		vp = int((max_wh - h) / 2)
+		padding = (hp, vp, hp, vp)
+		return F.pad(image, padding, 0, 'constant')
+
 
 
 # %%
@@ -541,8 +1235,9 @@ if __name__ == '__main__':
         shuffle=True,
         num_workers=4,
     )
+    d = list(ds.loaders['train'])
+    d[0][0].shape, d[0][0].mean()
     ds.info
 
 
 # %%
-

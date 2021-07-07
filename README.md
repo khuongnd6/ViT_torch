@@ -14,11 +14,13 @@ Currently supporting:
 python -m pip install -r requirements.txt
 ```
 ## Run
-- Finetune (example)
+- Finetune
+(example with 30 epochs on stl10 from pretrained dino_vitb8 with sgd at 0.001 initial learning rate, 3 fc layers)
 ```
-python main.py --epoch 50 --dataset stl10 --bs 2048 --lr 0.002 --arch dino_vits16
+python main.py --epoch 30 --dataset stl10 --root_path /host/ubuntu/torch --bs 128 --pretrained --arch dino_vitb8 --opt sgd --lr 0.001 --fc 256 128 32
 ```
-- Linear Evaluation (example)
+- Linear Evaluation
+(example with 30 epochs on stl10 from pretrained dino_vitb8 with adamw at 0.001 initial learning rate, 3 fc layers)
 ```
-python main.py --epoch 50 --dataset stl10 --bs 2048 --lr 0.002 --arch dino_vits16 --lineareval 1
+python main.py --epoch 30 --dataset stl10 --root_path /host/ubuntu/torch --bs 128 --pretrained --arch dino_vitb8 --lineareval --opt adamw --lr 0.001 --fc 256 128 32
 ```

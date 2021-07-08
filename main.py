@@ -62,11 +62,13 @@ config = [
     ('note', '', str, None, 'note to recognize the run'),
     ('opt', 'sgd', str, None, 'set the optimizer'),
     ('fc', [], int, None, 'the units for the additional fc layers'),
-    ('multiple_frozen', 1, int, None, 'multiply the frozen train dataset by this amount'),
-    ('update_frozen_rate', 2, int, None, 'set to int >0 to update the frozen values every <this> epochs'),
-    ('pp_cache_path', '/host/ubuntu/torch/tire_500_lbp', str, None, ''),
-    ('autoaugment_imagenet', False, bool),
+    # ('multiple_frozen', 1, int, None, 'multiply the frozen train dataset by this amount'),
+    # ('update_frozen_rate', 2, int, None, 'set to int >0 to update the frozen values every <this> epochs'),
+    ('aug_auto_imagenet', 1, int, [0, 1]),
+    ('aug_random_crop', 1, int, [0, 1]),
+    ('aug_color_jitter', 1, int, [0, 1]),
     ('image_size', 0, int),
+    ('tire_settings', 0, int, None, 'settings [0-3] for tire dataset preprocessing'),
 ]
 
 def main():
@@ -84,23 +86,28 @@ def main():
     
     _image_channels = 3
     if args['dataset'] in Datasets.available_datasets:
-        _transform_resize = []
-        if args['image_size'] > 0:
-            _transform_resize = [transforms.Resize(args['image_size'],InterpolationMode.BICUBIC)]
+        # _transform_resize = []
+        # if args['image_size'] > 0:
+        #     _transform_resize = [transforms.Resize(args['image_size'],InterpolationMode.BICUBIC)]
         ds = Datasets(
             dataset=args['dataset'],
+            image_size=args['image_size'],
             root_path=args['root_path'],
             batchsize=args['bs'],
-            transform_pre=_transform_resize,
+            # transform_pre=[],
             download=True,
             splits=['train', 'test'],
-            shuffle=False,
+            shuffle=True,
             num_workers=4,
             limit_train=args['limit_train'],
             limit_test=args['limit_test'],
         )
     elif args['dataset'] == 'tire':
-        lbp_methods = ['r', 'g', 'b', 'default', 'uniform', 'ror', 'nri_uniform']
+        if args['tire_settings'] == 0:
+            lbp_methods = ['r', 'g', 'b', 'default', 'uniform', 'ror', 'nri_uniform']
+        elif args['tire_settings'] == 1:
+            lbp_methods = ['l', 'default', 'uniform']
+        
         _image_channels = len(lbp_methods)
         assert args['image_size'] > 0, 'must provide arg `image_size` of int >0'
         ds = get_tire_dataset(
@@ -111,12 +118,11 @@ def main():
             train_ratio=0.8,
             limit=0,
             image_size=args['image_size'],
-            # autoaugment_imagenet=args['autoaugment_imagenet'],
             # force_reload=False,
             lbp={'radius': 1, 'point_mult': 8, 'methods': lbp_methods},
-            random_crop=True,
-            color_jitter=True,
-            autoaugment_imagenet=True,
+            random_crop=bool(args['aug_random_crop']),
+            color_jitter=bool(args['aug_color_jitter']),
+            autoaugment_imagenet=bool(args['aug_auto_imagenet']),
         )
     else:
         raise ValueError('arg `dataset` [{}] is not supported!'.format(args['dataset']))

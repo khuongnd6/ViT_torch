@@ -120,8 +120,7 @@ class AccuracyMetrics(Metrics):
         #     self.value_best = self.value
         #     self.percent_best = self.value_best * 100
         #     self.last_is_best = True
-        if self.value > self.last_best:
-            self.is_best = True
+        self.is_best = self.value > self.last_best
         if with_best is not None:
             self.with_best = bool(with_best)
     
@@ -137,7 +136,7 @@ class AccuracyMetrics(Metrics):
             'value_best': self.value_best,
             'percent_best': self.percent_best,
             # 'best': self.best_str if self.last_is_best else '',
-            'best': self.best_str if self.is_best and self.with_best else '',
+            'best': self.best_str if (self.is_best and self.with_best) else '',
         })
     
 
@@ -501,9 +500,9 @@ class Network:
                         metrics_best[_split][k] = max(metrics_best[_split][k], _stat[k])
                 if _training:
                     self.lr_scheduler.step()
-                    stats['train'].append(_stat)
-                else:
-                    stats['val'].append(_stat)
+                if _split not in stats:
+                    stats[_split] = []
+                stats[_split].append(_stat)
                 # save json master stats
                 if isinstance(fp_json_master, str):
                     self.save_stats(
@@ -541,7 +540,12 @@ class Network:
             m.to(self.device)
         for m in self.frozen_model_top:
             m.to(self.device)
-        metrics_acc = AccuracyMetrics('acc[{percent:6.2f}%{best}]', value=0.0, best_str='(best)', last_best=metrics_best.get('acc', 1.0))
+        metrics_acc = AccuracyMetrics(
+            'acc[{percent:6.2f}%{best}]',
+            value=0.0,
+            best_str='(best)',
+            last_best=metrics_best.get('acc', 1.0),
+        )
         pl = ProgressLog(
             name='Train' if training else '  Val',
             epochs=epoch_final,

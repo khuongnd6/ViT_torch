@@ -470,24 +470,13 @@ class CustomFrozenRepresentations(torch.utils.data.Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         
-        
         _repr = self.reprs[idx]
         _label = self.labels[idx]
         sample = [_repr, _label]
         
-        
-        # img_name = os.path.join(self.root_dir,
-        #                         self.landmarks_frame.iloc[idx, 0])
-        # image = io.imread(img_name)
-        # landmarks = self.landmarks_frame.iloc[idx, 1:]
-        # landmarks = np.array([landmarks])
-        # landmarks = landmarks.astype('float').reshape(-1, 2)
-        # sample = {'image': image, 'landmarks': landmarks}
-        # if self.transform:
-        #     sample = self.transform(sample)
-
         return sample
 
+# %%
 class CustomFrozenDatasets:
     def __init__(self,
                 train_reprs=None,
@@ -560,6 +549,8 @@ class Datasets_Single:
                 transforms.RandomHorizontalFlip(),
             ])
         if auto_policy is not None:
+            if auto_policy is True:
+                auto_policy = ImageNetPolicy()
             trans['train'].append(auto_policy)
         
         if to_tensor:
@@ -870,7 +861,7 @@ class Datasets:
                     _set,
                     num_replicas=ddp['size'],
                     rank=ddp['rank'],
-                    shuffle=shuffle,
+                    shuffle=shuffle and _split == 'train',
                 )
                 _loader = torch.utils.data.DataLoader(
                     _set,

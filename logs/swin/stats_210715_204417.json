@@ -1,0 +1,82 @@
+{
+    "info": {
+        "device": "cuda",
+        "epoch": 50,
+        "dataset": "stl10",
+        "data_path": "/host/ubuntu/torch",
+        "bs": 16,
+        "root_path": "/host/ubuntu/torch",
+        "arch": "dino_vitb8",
+        "lr": 0.001,
+        "lr_scheduler": "step",
+        "lr_step": 10,
+        "lr_gamma": 0.5,
+        "lr_scale": 0.1,
+        "limit_train": 0,
+        "limit_test": 0,
+        "stats_fp": "./logs/swin/stats_210715_204417.json",
+        "lineareval": true,
+        "earlystop_epoch": 10,
+        "pretrained": true,
+        "note": "",
+        "opt": "adamw",
+        "fc": [
+            512,
+            128,
+            32
+        ],
+        "image_size": 224
+    },
+    "telem": {
+        "hardware": "1x3090",
+        "sample_count_train": 5000,
+        "sample_count_val": 8000,
+        "completed": false,
+        "time_stamp": "210715_204417",
+        "time_start": null,
+        "time_finish": null,
+        "time_elapsed": null,
+        "time_updated": 1626382116.4588187,
+        "bs": null,
+        "mode": "lineareval"
+    },
+    "results": {
+        "epochs": 0,
+        "epoch.time": 242.84402513504028,
+        "epoch.sample_time": 0.0,
+        "train.time": 96.52851510047913,
+        "val.time": 146.31551003456116,
+        "train.sample_time": 0.019305703020095825,
+        "val.sample_time": 0.018289438754320146,
+        "train.acc": 0.9716,
+        "train.loss": 9.999,
+        "val.acc": 0.98925,
+        "val.loss": 9.999
+    },
+    "train": [
+        {
+            "epoch": 0,
+            "sample": 5000,
+            "lr": 0.0010000000000000002,
+            "loss": 0.1201303184461373,
+            "acc": 0.9716,
+            "time": 96.52851510047913,
+            "time_start": 1626381873.4714224,
+            "time_finish": 1626381969.9999375,
+            "time_cost": 96.52851510047913
+        }
+    ],
+    "val": [
+        {
+            "epoch": 0,
+            "sample": 8000,
+            "lr": 0.0,
+            "loss": 0.039300362531494104,
+            "acc": 0.98925,
+            "time": 146.31551003456116,
+            "time_start": 1626381970.0686257,
+            "time_finish": 1626382116.3841357,
+            "time_cost": 146.31551003456116
+        }
+    ]
+}

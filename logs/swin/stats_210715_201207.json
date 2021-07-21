@@ -1,0 +1,170 @@
+{
+    "info": {
+        "device": "cuda",
+        "epoch": 50,
+        "dataset": "stl10",
+        "data_path": "/host/ubuntu/torch",
+        "bs": 16,
+        "root_path": "/host/ubuntu/torch",
+        "arch": "swin_large_patch4_window7_224_22k",
+        "lr": 0.001,
+        "lr_scheduler": "step",
+        "lr_step": 10,
+        "lr_gamma": 0.5,
+        "lr_scale": 0.1,
+        "limit_train": 0,
+        "limit_test": 0,
+        "stats_fp": "./logs/swin/stats_210715_201207.json",
+        "lineareval": true,
+        "earlystop_epoch": 10,
+        "pretrained": true,
+        "note": "",
+        "opt": "adamw",
+        "fc": [
+            512,
+            128,
+            32
+        ],
+        "image_size": 224
+    },
+    "telem": {
+        "hardware": "1x3090",
+        "sample_count_train": 5000,
+        "sample_count_val": 8000,
+        "completed": false,
+        "time_stamp": "210715_201207",
+        "time_start": null,
+        "time_finish": null,
+        "time_elapsed": null,
+        "time_updated": 1626380582.666673,
+        "bs": null,
+        "mode": "lineareval"
+    },
+    "results": {
+        "epochs": 4,
+        "epoch.time": 126.7222846508026,
+        "epoch.sample_time": 0.0,
+        "train.time": 49.59604868888855,
+        "val.time": 77.12623596191406,
+        "train.sample_time": 0.00991920973777771,
+        "val.sample_time": 0.009640779495239258,
+        "train.acc": 0.9996,
+        "train.loss": 9.999,
+        "val.acc": 0.995625,
+        "val.loss": 9.999
+    },
+    "train": [
+        {
+            "epoch": 0,
+            "sample": 5000,
+            "lr": 0.0010000000000000002,
+            "loss": 0.13043717772345811,
+            "acc": 0.9724,
+            "time": 54.06779098510742,
+            "time_start": 1626379947.9855292,
+            "time_finish": 1626380002.0533202,
+            "time_cost": 54.06779098510742
+        },
+        {
+            "epoch": 1,
+            "sample": 5000,
+            "lr": 0.0010000000000000002,
+            "loss": 0.013764670352740588,
+            "acc": 0.9958,
+            "time": 48.34290790557861,
+            "time_start": 1626380079.379332,
+            "time_finish": 1626380127.72224,
+            "time_cost": 48.34290790557861
+        },
+        {
+            "epoch": 2,
+            "sample": 5000,
+            "lr": 0.0010000000000000002,
+            "loss": 0.0024431491146359873,
+            "acc": 0.9996,
+            "time": 48.68424987792969,
+            "time_start": 1626380204.9732378,
+            "time_finish": 1626380253.6574876,
+            "time_cost": 48.68424987792969
+        },
+        {
+            "epoch": 3,
+            "sample": 5000,
+            "lr": 0.0010000000000000002,
+            "loss": 0.005499237013465315,
+            "acc": 0.9982,
+            "time": 48.35021138191223,
+            "time_start": 1626380330.9098094,
+            "time_finish": 1626380379.2600207,
+            "time_cost": 48.35021138191223
+        },
+        {
+            "epoch": 4,
+            "sample": 5000,
+            "lr": 0.0010000000000000002,
+            "loss": 0.002214860927416374,
+            "acc": 0.9992,
+            "time": 48.535083293914795,
+            "time_start": 1626380456.5892375,
+            "time_finish": 1626380505.1243207,
+            "time_cost": 48.535083293914795
+        }
+    ],
+    "val": [
+        {
+            "epoch": 0,
+            "sample": 8000,
+            "lr": 0.0,
+            "loss": 0.02246339672958129,
+            "acc": 0.994375,
+            "time": 77.1250650882721,
+            "time_start": 1626380002.142819,
+            "time_finish": 1626380079.267884,
+            "time_cost": 77.1250650882721
+        },
+        {
+            "epoch": 1,
+            "sample": 8000,
+            "lr": 0.0,
+            "loss": 0.03484853072662372,
+            "acc": 0.992625,
+            "time": 77.03845930099487,
+            "time_start": 1626380127.8293118,
+            "time_finish": 1626380204.8677711,
+            "time_cost": 77.03845930099487
+        },
+        {
+            "epoch": 2,
+            "sample": 8000,
+            "lr": 0.0,
+            "loss": 0.022166132674172105,
+            "acc": 0.995625,
+            "time": 77.03564310073853,
+            "time_start": 1626380253.757749,
+            "time_finish": 1626380330.7933922,
+            "time_cost": 77.03564310073853
+        },
+        {
+            "epoch": 3,
+            "sample": 8000,
+            "lr": 0.0,
+            "loss": 0.040066342291642285,
+            "acc": 0.99025,
+            "time": 77.11203670501709,
+            "time_start": 1626380379.3674986,
+            "time_finish": 1626380456.4795353,
+            "time_cost": 77.11203670501709
+        },
+        {
+            "epoch": 4,
+            "sample": 8000,
+            "lr": 0.0,
+            "loss": 0.03521193199034707,
+            "acc": 0.9935,
+            "time": 77.31997561454773,
+            "time_start": 1626380505.2370596,
+            "time_finish": 1626380582.5570352,
+            "time_cost": 77.31997561454773
+        }
+    ]
+}

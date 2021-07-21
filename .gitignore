@@ -8,3 +8,4 @@ debug_sandbox.py
 main_backup_210629.py
 *.cpython-38.pyc
 vision/*
+data/*

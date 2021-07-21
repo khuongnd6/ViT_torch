@@ -529,8 +529,26 @@ class CustomFrozenDatasets:
 
 # %%
 class Datasets_Single:
-    def __init__(self):
+    def __init__(self, num_labels=1000, splits=['train', 'val']):
         pass
+    #     self.num_labels = num_labels
+    #     self.dataset = None
+    #     self.splits = splits
+    
+    # @property
+    # def info(self):
+    #     return {
+    #         'dataset': self.dataset,
+    #         'batch_count': {
+    #             _split: None if self.batch_count is None else len(self.batch_count)[_split]
+    #             for _split in self.splits
+    #         },
+    #         'sample_count': {
+    #             _split: None if self.batch_count is None else len(self.batch_count)[_split]
+    #             for _split in self.splits
+    #         },
+    #         'num_labels': self.num_labels,
+    #     }
     
     @classmethod
     def get_trans(cls, image_size=32, resize=True, base_train_trans=True, auto_policy=None, norm_values=None, to_tensor=True):

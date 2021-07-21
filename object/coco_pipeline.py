@@ -26,10 +26,19 @@ time_start = time.time()
 
 # %%
 parser = argparse.ArgumentParser()
+
+parser.add_argument('--epoch', type=int, default=10,)
+parser.add_argument('--bs', type=int, default=2)
+
+parser.add_argument('--lr', type=float, default=0.001)
+parser.add_argument('--lr_schedule_step', type=int, default=4,)
+parser.add_argument('--lr_schedule_gamma', type=float, default=0.3,)
+
 parser.add_argument('--train_limit', type=int, default=20000)
 parser.add_argument('--val_limit', type=int, default=5000)
-parser.add_argument('--lr', type=float, default=0.002)
-parser.add_argument('--bs', type=int, default=2)
+
+parser.add_argument('--data_path', type=str, default='/host/ubuntu/torch/coco2017')
+
 args = parser.parse_args()
 
 # %%
@@ -37,31 +46,6 @@ train_limit = args.train_limit
 val_limit = args.val_limit
 _lr = args.lr
 _bs = args.bs
-
-# %%
-dataset = foz.load_zoo_dataset(
-    name='coco-2017',
-    split='validation',
-    # split='train',
-    # splits=None,
-    # label_field=None,
-    # dataset_name=None,
-    dataset_dir='/host/ubuntu/torch/coco2017',
-    # download_if_necessary=True,
-    # drop_existing_dataset=False,
-    # overwrite=False,
-    # cleanup=True,
-)
-time_elapsed = time.time() - time_start
-print('Done loading dataset in {:.0f}s'.format(time_elapsed))
-
-# %%
-print('type: ', type(dataset))
-print()
-print(dataset)
-
-# %%
-dataset.compute_metadata()
 
 # %%
 class FiftyOneTorchDataset(torch.utils.data.Dataset):
@@ -142,6 +126,141 @@ class FiftyOneTorchDataset(torch.utils.data.Dataset):
     def get_classes(self):
         return self.classes
 
+
+# %%
+class Datasets_COCO2017:
+    all_labels_train = [
+            # 'background',
+            'airplane', 'apple', 'backpack', 'banana', 'baseball bat', 'baseball glove', 'bear', 'bed', 'bench',
+            'bicycle', 'bird', 'boat', 'book', 'bottle', 'bowl', 'broccoli', 'bus', 'cake', 'car', 'carrot',
+            'cat', 'cell phone', 'chair', 'clock', 'couch', 'cow', 'cup', 'dining table', 'dog', 'donut',
+            'elephant', 'fire hydrant', 'fork', 'frisbee', 'giraffe', 'hair drier', 'handbag', 'horse',
+            'hot dog', 'keyboard', 'kite', 'knife', 'laptop', 'microwave', 'motorcycle', 'mouse', 'orange',
+            'oven', 'parking meter', 'person', 'pizza', 'potted plant', 'refrigerator', 'remote', 'sandwich',
+            'scissors', 'sheep', 'sink', 'skateboard', 'skis', 'snowboard', 'spoon', 'sports ball', 'stop sign',
+            'suitcase', 'surfboard', 'teddy bear', 'tennis racket', 'tie', 'toaster', 'toilet', 'toothbrush',
+            'traffic light', 'train', 'truck', 'tv', 'umbrella', 'vase', 'wine glass', 'zebra']
+    
+    def __init__(self,
+                splits=['train', 'val'],
+                labels=None,
+                data_path='./data',
+                limits=None,
+                coco_split_overwrite=None,
+                bs=4,
+                shuffle=True,
+                num_workers=8,
+                ):
+        self.dataset_name = 'coco-2017'
+        self.split_mapping = {
+            'train': 'train',
+            'val': 'validation',
+        }
+        self.splits = splits
+        self.views = {}
+        self.sets = {}
+        self.loaders = {}
+        self.num_labels = None
+        self.data_path = data_path
+        transform = {
+            _split: T.Compose([T.ToTensor()])
+            for _split in self.splits
+        }
+        self.bs = bs
+        
+        self.labels = None
+        if isinstance(labels, (list)):
+            self.labels = [v for v in labels if v in self.all_labels_train]
+        if not isinstance(self.labels, list) or len(self.labels) <= 0:
+            self.labels = self.all_labels_train
+        
+        self.num_labels = len(self.labels)
+        assert self.num_labels > 0
+        
+        self.info = {
+            'dataset': self.dataset_name,
+            'sample_count_raw': {},
+            'sample_count_filtered': {},
+            'sample_count': {},
+            'batch_count': {},
+            'num_labels': self.num_labels,
+        }
+        
+        for i, _split in enumerate(self.splits):
+            _training = _split == 'train'
+            if not isinstance(coco_split_overwrite, str):
+                if _split not in self.split_mapping:
+                    raise ValueError('split [{}] is not supported with dataset [{}]'.format(
+                        _split, self.dataset_name
+                    ))
+            coco_split = coco_split_overwrite
+            coco_split = self.split_mapping[_split]
+            _foz_set = foz.load_zoo_dataset(
+                name=self.dataset_name,
+                split=coco_split,
+                # splits=None,
+                # label_field=None,
+                # dataset_name=None,
+                dataset_dir=self.data_path,
+                # download_if_necessary=True,
+                # drop_existing_dataset=False,
+                # overwrite=False,
+                # cleanup=True,
+            )
+            _foz_set.compute_metadata()
+            raw_count = len(_foz_set)
+            _set = _foz_set
+            
+            # labels_list = [
+            #     'car', 'truck', 'bus', 'bicycle',
+            #     'chair', 'person', 'bench',
+            #     'bird', 'cat', 'dog',
+            # ]
+            if _training:
+                _set = _set.filter_labels(
+                    "ground_truth",
+                    F("label").is_in(self.labels),
+                )
+                # _set = _set.match(
+                #     F("predictions.detections").filter(F("label").is_in(self.labels)).length() > 0
+                # )
+            
+            filtered_count = len(_set)
+            _limit = raw_count
+            if isinstance(limits, int):
+                _limit = limits
+            elif isinstance(limits, (list, tuple)) and len(limits) > i:
+                _limit = limits[i]
+            _view = _set.take(_limit, seed=0)
+            _view
+            self.views[_split] = _view
+            torch_dataset = FiftyOneTorchDataset(
+                fiftyone_dataset=_view,
+                transforms=transform[_split],
+                # gt_field="ground_truth",
+                # classes=None,
+                classes=self.labels,
+            )
+            _bs = self.bs
+            if not _training:
+                # lock val/test bs to 1 (for now)
+                _bs = 1
+            torch_loader = torch.utils.data.DataLoader(
+                torch_dataset,
+                batch_size=_bs,
+                shuffle=shuffle and _training,
+                num_workers=num_workers,
+                collate_fn=utils.collate_fn,
+            )
+            
+            self.sets[_split] = torch_dataset
+            self.loaders[_split] = torch_loader
+            self.info['batch_count'][_split] = len(torch_loader)
+            self.info['sample_count'][_split] = len(torch_dataset)
+            self.info['sample_count_raw'][_split] = raw_count
+            self.info['sample_count_filtered'][_split] = filtered_count
+
+
 # %%
 def get_model_FRCNN(num_classes):
     # load a model pre-trained on COCO
@@ -155,102 +274,20 @@ def get_model_FRCNN(num_classes):
     
     return model
 
-# %%
-
-# Define simple image transforms
-# train_transforms = T.Compose([T.ToTensor(), T.RandomHorizontalFlip(0.5)])
-train_transforms = T.Compose([T.ToTensor()])
-val_transforms = T.Compose([T.ToTensor()])
-
-labels_list = None
-data_view = dataset
-
-all_labels_train = [
-    # 'background',
-    'airplane', 'apple', 'backpack', 'banana', 'baseball bat', 'baseball glove', 'bear', 'bed', 'bench', 'bicycle', 'bird', 'boat', 'book', 'bottle', 'bowl', 'broccoli', 'bus', 'cake', 'car', 'carrot', 'cat', 'cell phone', 'chair', 'clock', 'couch', 'cow', 'cup', 'dining table', 'dog', 'donut', 'elephant', 'fire hydrant', 'fork', 'frisbee', 'giraffe', 'hair drier', 'handbag', 'horse', 'hot dog', 'keyboard', 'kite', 'knife', 'laptop', 'microwave', 'motorcycle', 'mouse', 'orange', 'oven', 'parking meter', 'person', 'pizza', 'potted plant', 'refrigerator', 'remote', 'sandwich', 'scissors', 'sheep', 'sink', 'skateboard', 'skis', 'snowboard', 'spoon', 'sports ball', 'stop sign', 'suitcase', 'surfboard', 'teddy bear', 'tennis racket', 'tie', 'toaster', 'toilet', 'toothbrush', 'traffic light', 'train', 'truck', 'tv', 'umbrella', 'vase', 'wine glass', 'zebra']
-
-labels_list = all_labels_train
-
-# labels_list = [
-#     'car', 'truck', 'bus', 'bicycle',
-#     'chair', 'person', 'bench',
-#     'bird', 'cat', 'dog',
-# ]
-data_view = dataset.filter_labels(
-    "ground_truth",
-    F("label").is_in(labels_list),
-)
-# matching_view = data_view.match(
-#     F("predictions.detections").filter(F("label").is_in(labels_list)).length() > 0
-# )
-
-raw_count = len(dataset)
-filtered_count = len(data_view)
-if val_limit <= 0:
-    val_limit = int(filtered_count * 0.2)
-if train_limit <= 0:
-    filtered_count - val_limit
-assert filtered_count > val_limit > 0
-assert train_limit > 0
-train_view = data_view.take(min(train_limit, len(data_view) - val_limit), seed=0)
-val_view = data_view.exclude(train_view).take(val_limit)
-
-print('\nCreated views: raw[{}] total_filtered[{}] train[{}] test[{}]\n'.format(
-    raw_count,
-    filtered_count,
-    len(train_view), len(val_view)))
 
 # %%
-torch_dataset = FiftyOneTorchDataset(
-    fiftyone_dataset=train_view,
-    # transforms=torchvision.transforms.Compose([
-    #     # torchvision.transforms.Resize([224, 224]),
-    #     torchvision.transforms.Resize(224),
-    #     torchvision.transforms.CenterCrop(224),
-    #     torchvision.transforms.RandomHorizontalFlip(),
-    #     torchvision.transforms.ToTensor(),
-    # ]),
-    transforms=train_transforms,
-    # gt_field="ground_truth",
-    # classes=None,
-    classes=labels_list,
-)
-
-# %%
-torch_dataset
-torch_dataset_val = FiftyOneTorchDataset(val_view, val_transforms, 
-        classes=labels_list)
-
-# %%
-# loader = torch.utils.data.DataLoader(
-#     torch_dataset,
-#     batch_size=4,
-#     shuffle=False,
-#     num_workers=8,
-#     # collate_fn=utils.collate_fn,
-#     collate_fn=_collate_fn,
-# )
-# # loader = torch.utils.data.DataLoader(
-# #     ds,
-# #     batch_size=4,
-# #     shuffle=False,
-# #     num_workers=8,
-# # )
-# loader
-# for i, data in enumerate(loader):
-#     print('\r{}/{}'.format(i, len(loader)).ljust(32), end='')
-
-
-# %%
-def do_training(model, torch_dataset, torch_dataset_val, num_epochs=4, stats_fp='./logs/stats_{}.json'.format(time_stamp)):
-    # define training and validation data loaders
-    data_loader = torch.utils.data.DataLoader(
-        torch_dataset, batch_size=_bs, shuffle=True, num_workers=8,
-        collate_fn=utils.collate_fn)
-    
-    data_loader_val = torch.utils.data.DataLoader(
-        torch_dataset_val, batch_size=1, shuffle=False, num_workers=8,
-        collate_fn=utils.collate_fn)
+def do_training(
+            model,
+            dataloaders=[],
+            num_epochs=10,
+            stats_fp='./logs/stats_{}.json'.format(time_stamp),
+            telem={},
+            info={},
+            lr=0.001,
+            lr_schedule_step=4,
+            lr_schedule_gamma=0.3,
+            initial_validation=True,
+            ):
     
     # train on the GPU or on the CPU, if a GPU is not available
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -261,43 +298,45 @@ def do_training(model, torch_dataset, torch_dataset_val, num_epochs=4, stats_fp=
     
     # construct an optimizer
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=_lr,
-                                momentum=0.9, weight_decay=0.0005)
+    optimizer = torch.optim.SGD(
+        params,
+        lr=lr,
+        momentum=0.9,
+        weight_decay=0.0005,
+    )
     # and a learning rate scheduler
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
-                                                    step_size=4,
-                                                    gamma=0.3)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=lr_schedule_step,
+        gamma=lr_schedule_gamma,
+    )
     
     _logging_stat = False
     stats = {
-        'info': {
-            'lr': _lr,
-        },
+        'info': {**info},
         'telem': {
-            'time_stamp': time_stamp,
-            'sample_count_train': len(torch_dataset),
-            'sample_count_val': len(torch_dataset_val),
-            'epochs': num_epochs,
+            'device': str(device),
+            **telem,
         },
         'logs': [],
     }
+    metric_loggers = []
+    coco_evaluators = []
     if isinstance(stats_fp, str) and stats_fp.endswith('.json'):
         _dp = os.path.split(stats_fp)[0]
         if not os.path.isdir(_dp):
             os.makedirs(_dp)
         _logging_stat = True
-    for epoch in range(num_epochs):
-        # train for one epoch, printing every 10 iterations
-        _metric_logger = train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
     
-        # update the learning rate
-        lr_scheduler.step()
-        # evaluate on the test dataset
-        _coco_evaluator = evaluate(model, data_loader_val, device=device)
-        
-        if _logging_stat:
-            train_stats = {str(k): float(v.global_avg) for k, v in _metric_logger.meters.items()}
-            val_stats = {
+    def save_stats(epoch, metric_logger=None, coco_evaluator=None, time_costs={}):
+        _stat = {
+            'epoch': epoch,
+            **time_costs,
+        }
+        if metric_logger is not None:
+            _stat['train'] = {str(k): float(v.global_avg) for k, v in metric_logger.meters.items()}
+        if coco_evaluator is not None:
+            _stat['val'] = {
                 str(m): {
                     str(k): float(v)
                     for k, v in zip(
@@ -305,24 +344,78 @@ def do_training(model, torch_dataset, torch_dataset_val, num_epochs=4, stats_fp=
                         c.stats,
                     )
                 }
-                for m, c in _coco_evaluator.coco_eval.items()
+                for m, c in coco_evaluator.coco_eval.items()
             }
-            stats['logs'].append({
-                'train': train_stats,
-                'val': val_stats,
-            })
-            with open(stats_fp, 'w') as f:
-                json.dump(stats, f, indent=4)
+        stats['logs'].append(_stat)
+        with open(stats_fp, 'w') as f:
+            json.dump(stats, f, indent=4)
         
-    return _metric_logger, _coco_evaluator
+    
+    for epoch in range(num_epochs):
+        
+        if epoch == 0 and initial_validation and len(dataloaders) >= 2:
+            _coco_evaluator = evaluate(model, dataloaders[1], device=device)
+            if _logging_stat:
+                save_stats(
+                    epoch=0,
+                    # metric_logger=_metric_logger,
+                    coco_evaluator=_coco_evaluator,
+                    time_costs={},
+                )
+        
+        time_costs = {
+            'time_start': time.time(),
+            'time_finish': None,
+            'time_cost': None,
+        }
+        for dl, _training in zip(dataloaders, [True, False]):
+            _time_start = time.time()
+            # if epoch == -1 and initial_validation:
+            if _training:
+                _metric_logger = train_one_epoch(model, optimizer, dl, device, epoch, print_freq=10)
+                lr_scheduler.step()
+                time_costs['time_train'] = time.time() - _time_start
+            else:
+                _coco_evaluator = evaluate(model, dl, device=device)
+                time_costs['time_val'] = time.time() - _time_start
+        time_costs['time_finish'] = time.time()
+        time_costs['time_cost'] = time_costs['time_finish'] - time_costs['time_start']
+        
+        metric_loggers.append(_metric_logger)
+        coco_evaluators.append(_coco_evaluator)
+        
+        if _logging_stat:
+            save_stats(
+                epoch=epoch + 1,
+                metric_logger=_metric_logger,
+                coco_evaluator=_coco_evaluator,
+                time_costs=time_costs,
+            )
+        
+    return metric_loggers, coco_evaluators
 
 
 # %%
-num_classes=len(torch_dataset.get_classes())
-print('class count:', num_classes)
+ds = Datasets_COCO2017(
+    splits=['train', 'val'],
+    labels=None,
+    data_path=args.data_path,
+)
+print('loaded dataset [{}]: {}'.format(ds.dataset_name, json.dumps(ds.info, indent=4)))
 
-model = get_model_FRCNN(num_classes)
+model = get_model_FRCNN(ds.num_labels)
 
-do_training(model, torch_dataset, torch_dataset_val, num_epochs=30)
+do_training(
+    model=model,
+    dataloaders=[ds.loaders[k] for k in ['train', 'val']],
+    num_epochs=args.epoch,
+    stats_fp='./logs/stats_{}.json'.format(time_stamp),
+    info={**args.__dict__},
+    telem={},
+    lr=args.lr,
+    lr_schedule_step=args.lr_schedule_step,
+    lr_schedule_gamma=args.lr_schedule_gamma,
+    # initial_validation=True,
+)
 
 # %%

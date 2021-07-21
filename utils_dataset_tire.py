@@ -34,23 +34,43 @@ def get_tire_dataset(
             num_workers=16,
             train_ratio=0.8,
             image_size=224,
+            # center_crop=0,
+            zoom_amount=2.0,
+            random_crop_amount=1.2,
+            random_hflip=True,
+            random_vflip=True,
             limit=0,
             lbp={'radius': 2, 'point_mult': 16, 'methods': ['r', 'g', 'b', 'default', 'uniform', 'ror', 'nri_uniform']},
-            random_crop=True,
+            # random_crop=True,
             color_jitter=True,
             autoaugment_imagenet=True,
+            fill=128,
             ):
     # assert args['data_path'] == '/host/ubuntu/torch/tire/tire_500'
     # print('preparing datasets')
     # print('preprocess lbp merge images')
     dp = os.path.abspath(data_path)
-    
     train_augs = []
+    test_augs = []
     
-    if isinstance(random_crop, dict):
-        train_augs.append(transforms.RandomCrop(**random_crop))
-    elif random_crop is True:
-        train_augs.append(transforms.RandomCrop(size=image_size, padding=12, fill=(128, 128, 128)))
+    zoom_shape = int(image_size * max(1.0, random_crop_amount, zoom_amount) // 2 * 2)
+    pre_random_crop_shape = int(image_size * max(1.0, random_crop_amount) // 2 * 2)
+    _fill = (fill, fill, fill)
+    train_augs.extend([
+        TRANS.fit_to(shape=zoom_shape, fill=_fill),
+        transforms.CenterCrop(pre_random_crop_shape),
+        transforms.RandomCrop(size=int(image_size), padding=None, fill=_fill),
+    ])
+    test_augs.extend([
+        TRANS.fit_to(shape=int(image_size * max(1.0, random_crop_amount, zoom_amount) // 2 * 2), fill=_fill),
+        # transforms.CenterCrop(int(image_size * max(1.0, random_crop_amount) // 2 * 2)),
+        transforms.CenterCrop(size=int(image_size)),
+    ])
+    if random_hflip:
+        train_augs.append(transforms.RandomHorizontalFlip())
+    if random_vflip:
+        train_augs.append(transforms.RandomVerticalFlip())
+    
     
     if isinstance(color_jitter, dict):
         train_augs.append(transforms.ColorJitter(**color_jitter))
@@ -80,7 +100,7 @@ def get_tire_dataset(
             # transforms.CenterCrop(224),
             # SquarePad(),
             # transforms.Resize(224),
-            TRANS.fit_to(shape=image_size, fill=(128, 128, 128)),
+            # TRANS.fit_to(shape=image_size, fill=(128, 128, 128)),
             # transforms.Grayscale(),
             # transforms.Resize(32),
         ],
@@ -89,13 +109,14 @@ def get_tire_dataset(
             # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.0),
             # # transforms.RandomPerspective(distortion_scale=0.1, p=0.5, fill=(0, 255, 255)),
             # *[transforms.AutoAugment(policy=transforms.autoaugment.AutoAugmentPolicy.IMAGENET) for i in range(bool(autoaugment_imagenet))],
-            transforms.RandomHorizontalFlip(),
+            # transforms.RandomHorizontalFlip(),
             *train_augs,
             *lbp_augs,
             # TRANS.lbp_merge(radius=1, point_mult=8, methods=['l', 'default', 'uniform']),
             
         ],
         transform_fns_test=[
+            *test_augs,
             *lbp_augs,
             # TRANS.lbp_merge(radius=1, point_mult=8, methods=['l', 'default', 'uniform']),
         ],

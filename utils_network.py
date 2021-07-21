@@ -1,5 +1,6 @@
 # %%
 from types import ClassMethodDescriptorType
+from typing import Counter
 from numpy import core
 import torch
 from torch._C import Value
@@ -9,6 +10,8 @@ import torch.optim as optim
 import torch.nn as nn
 # import torch.nn.functional as F
 from torch.nn.modules.activation import GELU
+from torch.optim import optimizer
+from torch.optim import lr_scheduler
 from torch.optim.lr_scheduler import StepLR
 import torchvision
 import torchvision.transforms as transforms
@@ -16,6 +19,8 @@ import torchvision.transforms as transforms
 # from functools import partial
 # from xcit import XCiT
 from adabelief_pytorch import AdaBelief
+
+from utils_stats import *
 
 # %%
 import numpy as np
@@ -25,318 +30,56 @@ from PIL import Image
 import time, os, json, re, string, math, random, datetime
 import sys
 
-# %%
-class TimerLog:
-    def __init__(self, format='time[{elapsed:.1f}/{total:.1f}{unit}]'):
-        self.format = format
-        self.time_start = time.time()
-        self.progress = 0.000000001
-        self.update()
-    
-    def __str__(self) -> str:
-        self.update()
-        secs_limit = max(self.time_elapsed, self.time_total)
-        _unit = self.format_time(secs_limit)[-1]
-        values = {
-            'start': self.time_start,
-            'current': self.time_current,
-            'elapsed': self.format_time(self.time_elapsed, secs_limit)[0],
-            'total': self.format_time(self.time_total, secs_limit)[0],
-            'remain': self.format_time(self.time_remain, secs_limit)[0],
-            'unit': _unit,
-        }
-        return self.format.format(**{
-            k: v
-            for k, v in values.items()
-        })
-    
-    def start(self):
-        self.time_start = time.time()
-        self.update()
-        
-    def update(self, progress=None):
-        self.time_current = time.time()
-        self.time_elapsed = self.time_current - self.time_start
-        if progress:
-            self.progress = float(np.clip(progress, 0.000000001, 1.0))
-        # self.progress
-        self.time_total = self.time_elapsed / self.progress
-        self.time_remain = self.time_total - self.time_elapsed
-    
-    @classmethod
-    def format_time(self, secs=0, secs_limit=0):
-        units = {
-            'd': 864000,
-            'h': 3600,
-            'm': 60,
-            's': 1,
-        }
-        for k, v in units.items():
-            if k == 's' or secs >= v or secs_limit >= v:
-                return [secs / v, k]
 
 # %%
-class Metrics:
-    def __init__(self):
-        pass
-    
-    def update(self):
-        pass
-
-class AccuracyMetrics(Metrics):
-    def __init__(self, format='{percent:6.2f}%', fn=None, value=0.0, best_str='(best)', last_best=1.0):
-        self.fn = fn
-        self.format = format
-        self.value = value
-        self.percent = self.value * 100
-        self.value_best = 0.0
-        self.percent_best = self.value_best * 100
-        self.last_is_best = False
-        self.is_best = False
-        self.corrects = []
-        self.best_str = best_str
-        self.last_best = last_best
-        self.with_best = False
-    
-    def reset(self):
-        self.corrects = []
-    
-    def update(self, corrects=None, with_best=None):
-        if corrects is not None:
-            if isinstance(corrects, list):
-                self.corrects.extend([int(bool(v)) for v in corrects])
-            elif isinstance(corrects, np.ndarray):
-                self.corrects.extend([int(bool(v)) for v in corrects.reshape(-1)])
-            else:
-                raise ValueError()
-                # self.corrects.append(int(bool(corrects)))
-        if len(self.corrects) > 0:
-            self.value = float(np.mean(self.corrects))
-        else:
-            self.value = 0.0
-        self.percent = self.value * 100
-        # self.last_is_best = False
-        # if self.value > self.value_best:
-        #     self.value_best = self.value
-        #     self.percent_best = self.value_best * 100
-        #     self.last_is_best = True
-        self.is_best = self.value > self.last_best
-        if with_best is not None:
-            self.with_best = bool(with_best)
-    
-    def calc(self, *args, **kwargs):
-        _corrects = self.fn(*args, **kwargs)
-        self.update_count(_corrects)
-        return None
-    
-    def __str__(self) -> str:
-        return self.format.format(**{
-            'percent': self.percent,
-            'value': self.value,
-            'value_best': self.value_best,
-            'percent_best': self.percent_best,
-            # 'best': self.best_str if self.last_is_best else '',
-            'best': self.best_str if (self.is_best and self.with_best) else '',
-        })
-    
-
-class AverageMetrics(Metrics):
-    def __init__(self, format='{}', value=0.0, lower_is_better=False):
-        self.format = format
-        self.value = value
-        self.percent = self.value * 100
-        self.value_best = self.value
-        self.percent_best = self.value_best * 100
-        self.last_is_best = False
-        self.lower_is_better = bool(lower_is_better)
-        self.values = []
-    
-    def reset(self):
-        self.values = []
-    
-    def update(self, values=None):
-        if values is not None:
-            if isinstance(values, list):
-                self.values.extend([v for v in values])
-            else:
-                self.values.append(values)
-        if len(self.values) > 0:
-            self.value = float(np.mean(self.values))
-        # else:
-        #     self.value = 0.0
-        self.percent = self.value * 100
-        self.last_is_best = False
-        _is_best = False
-        if not self.lower_is_better and self.value > self.value_best:
-            _is_best = True
-        if self.lower_is_better and self.value < self.value_best:
-            _is_best = True
-        if _is_best:
-            self.value_best = self.value
-            self.percent_best = self.value_best * 100
-            self.last_is_best = True
-    
-    def __str__(self) -> str:
-        return self.format.format(**{
-            'percent': self.percent,
-            'value': self.value,
-            'value_best': self.value_best,
-            'percent_best': self.percent_best,
-        })
-
-class CounterLog:
-    box_chars = ['█', '▉','▊','▋', '▌', '▍', '▎', '▏', ' '][::-1]
-    def __init__(self,
-                total=10,
-                value=0,
-                format='[{value}/{total}]',
-                format_start=None,
-                format_finish=None,
-                bar_len=40,
-                ):
-        self.value = value
-        self.total = total
-        self.bar_len = bar_len
-        self.format = format
-        self.format_start = format
-        self.format_finish = format
-        if format_start:
-            self.format_start = format_start
-        if format_finish:
-            self.format_finish = format_finish
-    
-    def update(self, value=None):
-        if value:
-            self.value = value
-        self.progress = self.value / self.total
-        self.progress_percent = self.progress * 100
-        
-        self.bar = self.get_box_string(self.progress, self.bar_len)
-    
-    def __str__(self) -> str:
-        return self.format.format(**{
-            'value': self.value,
-            'total': self.total,
-            'progress': self.progress,
-            'progress_percent': self.progress_percent,
-            'bar': self.bar,
-        })
+class LRSchedule:
+    @classmethod
+    def get_base_fn(cls):
+        def _fn(e):
+            return 1.0
+        return _fn
     
     @classmethod
-    def get_box_string(cls, value=0.2, length=10):
-        box_count = float(np.clip(value, 0.0, 1.0) * length)
-        full_box_count = int(np.floor(box_count))
-        partial_box_count = box_count - full_box_count
-        partial_box_index = int(np.clip(
-            np.round(partial_box_count * (len(cls.box_chars) - 1)),
-            0,
-            len(cls.box_chars) - 1,
-        ))
-        s = cls.box_chars[-1] * full_box_count + cls.box_chars[partial_box_index]
-        s = s.ljust(length, ' ')[:length]
-        return s
-
-
-class ProgressLog:
-    box_chars = ['█', '▉','▊','▋', '▌', '▍', '▎', '▏', ' '][::-1]
+    def get_step_fn(cls, step=10, gamma=0.5):
+        assert step > 0
+        assert 1 >= gamma >= 0
+        def _fn(e):
+            return gamma ** np.floor(e / step)
+        return _fn
     
-    def __init__(self, name='', epochs=None, steps=None, timer='step', counters={}, metrics={}, bar_len=20, **kwargs):
-        self.fields = {}
-        self.bar_len = int(max(2, bar_len))
-        self.name = str(name)
-        
-        if isinstance(epochs, int) and epochs > 0:
-            self.fields['epoch'] = CounterLog(
-                total=epochs,
-                value=0,
-                format='epoch[{value}/{total}]',
-            )
-        if isinstance(steps, int) and steps > 0:
-            self.fields['step'] = CounterLog(
-                total=steps,
-                value=0,
-                format='step[{value}/{total}][{bar}]',
-                # format_finish='step[{value}/{total}][{bar}]',
-                bar_len=bar_len,
-            )
-        self.timer = timer
-        if timer:
-            self.fields['timer'] = TimerLog(
-                format='time[{elapsed:.1f}/{total:.1f}{unit}]',
-            )
-        for k, v in kwargs.items():
-            self.fields[k] = v
+    @classmethod
+    def get_exp_fn(cls, gamma=0.99, step=1):
+        assert 1 >= gamma >= 0
+        assert step > 0
+        def _fn(e):
+            return gamma ** float(e / step)
+        return _fn
     
-    def __str__(self):
-        return self.get_str()
+    @classmethod
+    def get_cosine(cls, step=20, min_scale=0.1):
+        assert 1 >= min_scale >= 0
+        def _fn(e):
+            return (1.0 - min_scale) / 2 * (np.cos(np.mod(e / step, 0.5) * np.pi * 2) + 1) + min_scale
+        return _fn
     
-    def get_str(self):
-        ss = [self.name]
-        for k, v in self.fields.items():
-            v.update()
-            s = str(v)
-            ss.append(s)
-        return ' '.join(ss) + ' ' * 10
-    
-    def print(self, in_place=True):
-        _str = self.get_str()
-        if in_place:
-            print('\r' + _str, end='')
-        else:
-            print(_str)
-    
-    def update(self, print_in_place=False, **kwargs):
-        for k, v in kwargs.items():
-            if k in self.fields:
-                self.fields[k].update(v)
-                # self.fields[k]['value'] = v
-                # if self.fields[k].get('_type', None) == 'counter':
-                #     self.fields[k]['ratio'] = self.fields[k]['value'] / self.fields[k]['total']
-                #     self.fields[k]['percentage'] = self.fields[k]['ratio'] * 100
-                #     self.fields[k]['bar'] = self.get_box_string(self.fields[k]['ratio'], self.bar_len)
-        for k, v in self.fields.items():
-            if isinstance(v, TimerLog):
-                _progress = None
-                if self.timer in self.fields:
-                    _progress = self.fields[self.timer].progress
-                v.update(progress=_progress)
-        if print_in_place:
-            self.print(True)
-    
-    # def time_start(self):
-    #     self.time_start = time.time()
-    
-    # def time_update(self, progress=None):
-    #     self.time_current = time.time()
-    #     self.time_elapsed = self.time_current - self.time_start
-    #     self.time_ett = 0.0
-            
+    @classmethod
+    def get_cosine_exp(cls, step=20, min_scale=0.1, gamma=0.5):
+        assert 1 >= min_scale >= 0
+        assert 1 >= gamma >= 0
+        def _fn(e):
+            return (
+                (1.0 - min_scale) / 2 * (np.cos(np.mod(e / step, 0.5) * np.pi * 2) + 1) + min_scale
+            ) * gamma ** float(e / step)
+        return _fn
     
     # @classmethod
-    # def get_box_string(cls, value=0.2, length=10):
-    #     box_count = float(np.clip(value, 0.0, 1.0) * length)
-    #     full_box_count = int(np.floor(box_count))
-    #     partial_box_count = box_count - full_box_count
-    #     partial_box_index = int(np.round(partial_box_count / (len(cls.box_chars) - 1)))
-    #     s = cls.box_chars[-1] * full_box_count + cls.box_chars[partial_box_index]
-    #     s = s.ljust(length, ' ')[:length]
-    #     return s
+    # def get_cosine_annealing(cls, step=20, min_scale=0.1):
+    #     assert 1 >= min_scale >= 0
+    #     def _fn(e):
+    #         return (1.0 - min_scale) / 2 * (np.cos(np.mod(e / step, 0.5) * np.pi * 2) + 1) + min_scale
+    #     return _fn
 
 
-# PL = ProgressLog(
-#     epochs=21,
-#     steps=49,
-#     acc=AccuracyMetrics('acc[{percent:6.2f}%]'),
-#     loss=AverageMetrics('loss[{value:.6f}]')
-# )
-# time.sleep(0.5)
-# PL.update(
-#     step=7,
-#     epoch=3,
-#     acc=[bool(v) for v in np.random.randint(2, size=[20])],
-#     loss=[0.45, 0.1],
-# )
-# str(PL)
 
 # %%
 def classification_count_correct(outputs, labels):
@@ -350,6 +93,7 @@ def classification_count_correct(outputs, labels):
         # correct = correct.sum().item()
         correct = np.array(correct.cpu().detach().numpy()).reshape(-1)
         return correct
+
 
 # %%
 class EmptyWith:
@@ -368,34 +112,9 @@ class EmptyWith:
 #     a = 10
 #     print(a)
 
-# %%
-class Model(nn.Module):
-    def __init__(self):
-        pass
-    
-    def forward(self):
-        return 0
 
 # %%
 class Network:
-    arch_fns = {
-        
-        # 'dino_vits16': lambda **kwargs: torch.hub.load('facebookresearch/dino:main', 'dino_vits16'),
-        # 'dino_vits8': lambda **kwargs: torch.hub.load('facebookresearch/dino:main', 'dino_vits8'),
-        # 'dino_vitb16': lambda **kwargs: torch.hub.load('facebookresearch/dino:main', 'dino_vitb16'),
-        # 'dino_vitb8': lambda **kwargs: torch.hub.load('facebookresearch/dino:main', 'dino_vitb8'),
-        # 'dino_resnet50': lambda **kwargs: torch.hub.load('facebookresearch/dino:main', 'dino_resnet50'),
-        
-        # 'resnext50_32x4d': torchvision.models.resnext50_32x4d,
-        # 'resnext101_32x8d': torchvision.models.resnext101_32x8d,
-        # 'wide_resnet50_2': torchvision.models.wide_resnet50_2,
-        # 'wide_resnet101_2': torchvision.models.wide_resnet101_2,
-        
-        # 'densenet201': torchvision.models.densenet201,
-        # 'densenet169': torchvision.models.densenet169,
-        # 'densenet121': torchvision.models.densenet121,
-        
-    }
     
     optimizer_fns = {
         'sgd': lambda **kwargs: optim.SGD(**{'momentum': 0.9, **kwargs}),
@@ -426,13 +145,24 @@ class Network:
                 opt='sgd',
                 loss_fn=lambda *args: 0.0,
                 lr=0.001,
-                lr_schedule_type='step',
-                lr_schedule_step=10,
-                lr_schedule_gamma=0.5,
-                pretrained=True,
+                lr_type='step',
+                lr_step=10,
+                lr_gamma=0.5,
+                lr_scale=0.1,
+                # pretrained=True,
                 device='cuda',
                 metrics=[],
-                metrics_best=None,
+                # metrics_best=None,
+                # stats={},
+                info={},
+                telem={},
+                stats_fp=None,
+                epochs=1,
+                earlystop_epoch=0,
+                splits=['train', 'val'],
+                use_default_acc=True,
+                use_default_loss=True,
+                ds=None,
                 ):
         if isinstance(model, nn.Module):
             self.model = model
@@ -440,12 +170,45 @@ class Network:
             raise ValueError('model must be of type <torch.nn.Module>')
             # self.model = self.get_model(arch=model, pretrained=pretrained)
         
+        self.ds = None
+        _samples = None
+        if ds is not None:
+            self.ds = ds
+            _samples = {
+                'train': len(self.ds.loaders['train'].dataset),
+                'val': len(self.ds.loaders['test'].dataset),
+            }
+        self.splits = splits
+        self.epochs = int(max(epochs, 1))
+        self.epoch = 0
+        self.S = Stats(
+            name='',
+            info={**info},
+            telem={**telem},
+            path=stats_fp,
+            splits=self.splits,
+            metrics=metrics,
+            # metrics_hib=[],
+            # metrics_lib=[],
+            epoch=self.epochs,
+            sample=_samples,
+            with_bar=['sample'],
+            bar_len=20,
+            use_default_acc='use_default_acc',
+            use_default_loss='use_default_loss',
+            timer_progress='sample',
+        )
+        
         self.frozen_model_bottom = frozen_model_bottom
         if isinstance(self.frozen_model_bottom, nn.Module):
             self.frozen_model_bottom = [self.frozen_model_bottom]
+        if not isinstance(self.frozen_model_bottom, list):
+            self.frozen_model_bottom = []
         self.frozen_model_top = frozen_model_top
         if isinstance(self.frozen_model_top, nn.Module):
             self.frozen_model_top = [self.frozen_model_top]
+        if not isinstance(self.frozen_model_top, list):
+            self.frozen_model_top = []
         
         self.loss_fn = loss_fn
         if not callable(self.loss_fn):
@@ -453,72 +216,158 @@ class Network:
         self.lr = float(max(0.000000001, lr))
         self.optimizer = self.get_optimizer(name=opt, model=self.model, lr=self.lr)
         self.lr_scheduler = self.get_lr_scheduler(
-            type=lr_schedule_type,
+            type=lr_type,
             optimizer=self.optimizer,
-            step_size=lr_schedule_step,
-            gamma=lr_schedule_gamma,
+            step=lr_step,
+            gamma=lr_gamma,
+            scale=lr_scale,
+            # **kwargs,
         )
         self.device = device
-        self.metrics = metrics
     
     def fit(self,
                 dataloader_train=None,
                 dataloader_val=None,
-                epochs=10,
-                epoch_start=0,
-                fp_json_master=None,
-                time_stamp='<latest>',
-                stats={}
+                epochs=None,
+                epoch_start=None,
+                earlystop_epoch=10,
                 ):
-        metrics_best = {
-            'train': {'acc': 0.0},
-            'val': {'acc': 0.0},
+        val_splits = ['val']
+        dataloaders = {
+            'train': dataloader_train,
+            'val': dataloader_val,
         }
+        if dataloader_train is None and dataloader_val is None:
+            dataloaders = {
+                'train': self.ds.loaders['train'],
+                'val': self.ds.loaders['test'],
+            }
+        if epochs is None:
+            epochs = self.epochs
+        if epoch_start is None:
+            epoch_start = self.epoch
+        # self.stats.update(time_start=time.time())
         epoch_final = epoch_start + epochs
+        stopping = False
         for _epoch in range(epoch_start, epoch_final):
+            _time_start_epoch = time.time()
+            self.epoch = max(self.epoch, _epoch)
             print()
-            for _dataloader, _training in zip([dataloader_train, dataloader_val], [True, False]):
-                _split = ['val', 'train'][int(_training)]
+            if stopping:
+                print()
+                print('Stopped Early after {} epochs! Training Fishished.'.format(_epoch))
+                break
+            
+            
+
+            # for _dataloader, _training in zip([dataloader_train, dataloader_val], [True, False]):
+            for _split, _dataloader in dataloaders.items():
+                if _split not in self.splits:
+                    raise ValueError('split [{}] not found in self.splits {}'.format(_split, self.splits))
+                _training = _split not in val_splits
+                if _split in ['val', 'test'] and _training:
+                    print('please check the splits to make sure val_splits is set correctly')
                 if _dataloader is None:
                     continue
+                _time_start = time.time()
+                # _split = ['val', 'train'][int(_training)]
+                self.S.set_split(_split)
+                self.S.new_round()
                 dls = [_dataloader]
                 if isinstance(_dataloader, list):
                     dls = _dataloader
-                _stat = {}
+                # _stat_agg = []
                 for _dl in dls:
                     _stat = self.run_one_epoch(
                         dataloader=_dl,
                         epoch=_epoch,
                         training=_training,
                         print_fps=30,
-                        metrics_best=metrics_best[_split],
+                        # metrics_best={
+                        #     _type: values[_split]
+                        #     for _type, values in metrics_best.items()
+                        #     if _split in values
+                        # },
+                        # metrics_best={
+                        #     k: v.bests
+                        #     for k, v in metrics[_split].items()
+                        # },
                         epoch_final=epoch_final,
+                        lr_scheduler=self.lr_scheduler,
                     )
+                    # _stat_agg.append(_stat)
                     print()
-                for k in metrics_best[_split]:
-                    if k in _stat:
-                        metrics_best[_split][k] = max(metrics_best[_split][k], _stat[k])
+                _time_current = time.time()
+                # _stat = {
+                #     'epoch': _epoch + 1,
+                #     'time_start': _time_start,
+                #     'time_finish': _time_current,
+                #     'time_cost': _time_current - _time_start,
+                #     'loss': float(np.mean([float(v['loss']) for v in _stat_agg])),
+                #     'acc': float(np.mean([float(v['acc']) for v in _stat_agg])),
+                #     # 'vram': peak_vram_gb,
+                # }
+                
                 if _training:
                     self.lr_scheduler.step()
-                if _split not in stats:
-                    stats[_split] = []
-                stats[_split].append(_stat)
-                # save json master stats
-                if isinstance(fp_json_master, str):
-                    self.save_stats(
-                        stats,
-                        fp_json_master=fp_json_master,
-                        time_stamp=time_stamp,
-                    )
+                    _lr = self.lr_scheduler.get_last_lr()
+                self.S.finish_round(save=True)
+                    
+                # for k, v in metrics[_split].items():
+                #     if k in _stat:
+                #         metrics[_split][k].update(_stat[k])
+                # _SM = self.SM[_split]
+                # _stat_metrics = _SM.get_current_stat()
+                # self.stats.update(**{_split: _stat_metrics})
+                if _split == 'val':
+                    best_acc = self.S.SM['val'].total_metrics['acc'].best
+                    val_accs = [v['acc'] for v in self.S.SM['val'].get_stat()]
+                    if len(val_accs) >= earlystop_epoch:
+                        last_accs = val_accs[-earlystop_epoch:]
+                        if max(last_accs) < best_acc:
+                            stopping = True
+                
+                # if earlystop_epoch > 0 and _split == 'val':
+                #     for metric_type in metrics_best:
+                #         if metric_type not in self.stats.stats[_split]:
+                #             continue
+                #         d = metrics_best[metric_type]
+                #         if d.get('_skip_for_earlystopping', False):
+                #             continue
+                #         w = d.get('_improve_check_window', 5)
+                #         values = [v[metric_type] for v in self.stats.stats[_split]]
+                #         if len(values) < w + 1:
+                #             continue
+                #         _last_value = values[-1]
+                #         _prev_values = values[-w-1:-1]
+                #         _comps = np.sign([_last_value - v for v in _prev_values])
+                #         if d.get('_higher_is_better', True) and np.all(_comps < 0):
+                #             stopping = True
+                #         if not d.get('_higher_is_better', True) and np.all(_comps > 0):
+                #             stopping = True
+            _time_elapsed_epoch = time.time() - _time_start_epoch
+            # self.stats.save()
+            
+        self.S.finish()
+        
+        # self.stats.update(
+        #     time_finish=time.time(),
+        #     completed=True,
+        # )
+        # self.stats.save()
     
     def run_one_epoch(self,
                 dataloader,
                 epoch=0,
                 training=True,
-                print_fps=30,
+                print_fps=60,
                 metrics_best={},
                 epoch_final=None,
+                lr_scheduler=None,
+                DEBUG=False,
                 ):
+        
+        # DEBUG = not training
         
         losses = []
         _loss_avg = -1.
@@ -526,7 +375,7 @@ class Network:
         time_start = time.time()
         time_last_print = time_start
         correct_count = 0
-        sample_count = 0
+        sample_count = len(dataloader.dataset)
         acc_percent = 0.0
         time_ett = 1.0
         _outputs = []
@@ -540,201 +389,131 @@ class Network:
             m.to(self.device)
         for m in self.frozen_model_top:
             m.to(self.device)
-        metrics_acc = AccuracyMetrics(
-            'acc[{percent:6.2f}%{best}]',
-            value=0.0,
-            best_str='(best)',
-            last_best=metrics_best.get('acc', 1.0),
-        )
-        pl = ProgressLog(
-            name='Train' if training else '  Val',
-            epochs=epoch_final,
-            steps=batch_count,
-            timer='step',
-            loss=AverageMetrics('loss[{value:8.6f}]', value=99.9, lower_is_better=True),
-            acc=metrics_acc,
-        )
-        pl.update(
+        
+        self.S.update(
+            # _split,
+            sample=0,
             epoch=epoch,
-            step=0,
         )
-        pl.update(epoch=epoch, step=0)
-        pl.print()
+        self.S.print()
         
-        context = [torch.no_grad, EmptyWith][int(bool(training))]
         
-        with context():
-            for batch_index, data in enumerate(dataloader, 0):
-                inputs, labels = data
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
-                
-                x = inputs
-                with torch.no_grad():
-                    for m in self.frozen_model_bottom:
-                        x = m(x)
+        corrects = []
+        all_outputs = []
+        all_labels = []
+        
+        sample_count_current = 0
+        for batch_index, data in enumerate(dataloader, 0):
+            inputs, labels = data
+            sample_count_current += len(labels)
+            inputs = inputs.to(self.device)
+            labels = labels.to(self.device)
+            
+            x = inputs
+            with torch.no_grad():
+                for m in self.frozen_model_bottom:
+                    x = m(x)
+            
+            if training:
                 x = self.model(x)
+            else:
                 with torch.no_grad():
-                    for m in self.frozen_model_top:
-                        x = m(x)
-                outputs = x
-                
+                    x = self.model(x)
+            
+            with torch.no_grad():
+                for m in self.frozen_model_top:
+                    x = m(x)
+            
+            outputs = x
+            loss = None
+            if training:
                 loss = self.loss_fn(outputs, labels)
-                
-                # if return_values or debug:
-                #     _outputs.append(outputs.cpu().detach().numpy())
-                #     _labels.append(labels.cpu().detach().numpy())
-                
-                if training:
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    self.optimizer.step()
-                
-                # metrics = {
-                #     _name: _m['fn'](outputs, labels)
-                #     for _name, _m in self.metrics.items()
-                # }
-                _corrects = classification_count_correct(outputs, labels)
-                # correct_count += _correct
-                # sample_count += outputs.size(0)
-                # acc_percent = correct_count / max(sample_count, 1) * 100
-                
-                _loss_value = float(loss.item())
-                losses.append(_loss_value)
-                _loss_avg = sum(losses) / len(losses)
-                
-                # if i % max(20, int(batch_count // 4)) == 0:
-                #     peak_vram_gb = max(peak_vram_gb, get_vram_fn())
-                
-                _progress_percent = (batch_index + 1) / batch_count * 100
-                
-                time_current = time.time()
-                time_elapsed = time_current - time_start
-                time_ett = time_elapsed / max(0.000001, _progress_percent / 100)
-                time_eta = time_ett * (1 - _progress_percent / 100)
-                
-                metrics_acc.update(_corrects)
-                pl.update(
-                    step=batch_index + 1,
-                    # acc=_corrects,
-                    loss=_loss_value,
-                )
-                if print_fps > 0 and time_current >= time_last_print + 1 / print_fps:
-                    time_last_print = max(time_last_print + 1/30, time_current - 1/60)
-                    pl.print()
+            else:
+                with torch.no_grad():
+                    loss = self.loss_fn(outputs, labels)
+            
+            # if return_values or debug:
+            #     _outputs.append(outputs.cpu().detach().numpy())
+            #     _labels.append(labels.cpu().detach().numpy())
+            
+            if training:
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+            
+            _corrects = [int(v) for v in classification_count_correct(outputs, labels)]
+            if DEBUG:
+                outputs_class = torch.argmax(outputs, dim=-1)
+                o = list(np.array(outputs_class.cpu().detach().numpy()).reshape(-1))
+                l = list(np.array(labels.cpu().detach().numpy()).reshape(-1))
+                all_outputs.extend(o)
+                all_labels.extend(l)
+            
+            _loss_value = float(loss.item())
+            losses.append(_loss_value)
+            _loss_avg = sum(losses) / len(losses)
+            
+            # if i % max(20, int(batch_count // 4)) == 0:
+            #     peak_vram_gb = max(peak_vram_gb, get_vram_fn())
+            
+            _progress_percent = (batch_index + 1) / batch_count * 100
+            
+            time_current = time.time()
+            time_elapsed = time_current - time_start
+            time_ett = time_elapsed / max(0.000001, _progress_percent / 100)
+            time_eta = time_ett * (1 - _progress_percent / 100)
+            
+            # metrics_acc.update(_corrects)
+            # pl.update(
+            #     step=batch_index + 1,
+            #     # acc=_corrects,
+            #     loss=_loss_value,
+            # )
+            _lr = None
+            if training and lr_scheduler:
+                _lr = lr_scheduler.get_last_lr()
+            
+            # _SM.update(
+            #     acc=_corrects,
+            #     loss=_loss_value,
+            #     lr=_lr,
+            #     sample=sample_count_current,
+            #     # epoch=epoch,
+            # )
+            self.S.update(
+                # _split,
+                acc=[v for v in _corrects],
+                loss=_loss_value,
+                lr=_lr,
+                sample=sample_count_current,
+                # epoch=epoch,
+            )
+            if print_fps > 0 and time_current >= time_last_print + 1 / print_fps:
+                time_last_print = max(time_last_print + 1/30, time_current - 1/60)
+                self.S.print()
+                # _SM.print()
+                # pl.print()
             
         time_current = time.time()
         time_elapsed = time_current - time_start
-        metrics_acc.update(None, True)
-        pl.print()
-        _stat = {
-            'epoch': epoch + 1,
-            'time_start': time_start,
-            'time_finish': time_current,
-            'time_cost': time_elapsed,
-            'loss': float(_loss_avg),
-            'acc': float(metrics_acc.value),
-            # 'vram': peak_vram_gb,
-        }
-        return _stat
-    
-    # @classmethod
-    # def get_model(cls, arch, pretrained=None, include_top=True, prev_features=None, **kwargs):
-    #     # assert isinstance(arch, str)
-    #     # dino_archs = [
-    #     #     'dino_vits16',
-    #     #     'dino_vits8',
-    #     #     'dino_vitb16',
-    #     #     'dino_vitb8',
-    #     #     'dino_resnet50',
-    #     # ]
-    #     # xcit_urls = {
-    #     #     'xcit_small_12_p16': 'https://dl.fbaipublicfiles.com/xcit/xcit_small_12_p16_224.pth',
-    #     # }
-    #     # cnn_fns = {
-    #     #     'resnext50_32x4d': torchvision.models.resnext50_32x4d,
-    #     #     'resnext101_32x8d': torchvision.models.resnext101_32x8d,
-    #     #     'wide_resnet50_2': torchvision.models.wide_resnet50_2,
-    #     #     'wide_resnet101_2': torchvision.models.wide_resnet101_2,
-    #     #     'densenet201': torchvision.models.densenet201,
-    #     #     'densenet169': torchvision.models.densenet169,
-    #     #     'densenet121': torchvision.models.densenet121,
-    #     # }
         
-    #     # torch.hub.load('facebookresearch/dino:main', arch)
-    #     if isinstance(arch, nn.Module):
-    #         return arch
-        
-    #     if isinstance(arch, int):
-    #         print(prev_features)
-    #         if isinstance(prev_features, nn.Module):
-    #             prev_features = cls.get_output_shape(prev_features)[-1]
-    #         assert isinstance(prev_features, int)
-    #         return nn.Linear(prev_features, arch, bias=True)
-        
-    #     if isinstance(arch, list):
-    #         assert len(arch) >= 1
-    #         if len(arch) == 1:
-    #             return cls.get_model(
-    #                 arch[0],
-    #                 pretrained=pretrained,
-    #                 include_top=include_top,
-    #                 prev_features=None,
-    #                 **kwargs,
-    #             )
-    #         else:
-    #             _model_0 = cls.get_model(
-    #                 arch[0],
-    #                 pretrained=pretrained,
-    #                 include_top=include_top,
-    #                 prev_features=None,
-    #                 **kwargs,
-    #             )
-    #             _model_1 = cls.get_model(
-    #                 arch[1],
-    #                 pretrained=pretrained,
-    #                 include_top=include_top,
-    #                 prev_features=_model_0,
-    #                 **kwargs,
-    #             )
-    #             print(type(_model_0))
-    #             print(type(_model_1))
-    #             _model_01 = nn.Sequential([_model_0, _model_1])
-    #             return nn.Sequential([
-    #                 _model_01,
-    #                 *[
-    #                     cls.get_model(
-    #                         v,
-    #                         pretrained=pretrained,
-    #                         include_top=include_top,
-    #                         prev_features=_model_01,
-    #                         **kwargs,
-    #                     )
-    #                     for v in arch[2:]
-    #                 ],
-    #             ])
-        
-    #     if not isinstance(arch, str):
-    #         return arch
-    #     if arch in cls.arch_fns:
-    #         _kwargs = {**kwargs}
-    #         if pretrained is not None:
-    #             _kwargs = {
-    #                 **_kwargs,
-    #                 'pretrained': pretrained,
-    #             }
-    #         _model = cls.arch_fns[arch](**_kwargs)
-    #         if include_top == False:
-    #             if any([arch.startswith(v) for v in ['resne', 'wide_resne']]):
-    #                 _model.fc = nn.Identity()
+        if DEBUG:
+            assert training == False
+            all_outputs = np.array(all_outputs)
+            all_labels = np.array(all_labels)
+            print()
+            print('got outputs shape {} and labels shape {}'.format(all_outputs.shape, all_labels.shape))
+            all_corrects = (all_outputs == all_labels).astype(np.int32)
+            print('acc: ', float(np.mean(all_corrects)))
+            print('examples:')
+            r = 1
+            c = 20
+            for i in range(1):
+                print('output:', all_outputs[i * c: (i+1) * c])
+                print('label: ', all_labels[i * c: (i+1) * c])
                 
-    #             if any([arch.startswith(v) for v in ['densenet']]):
-    #                 _model.classifier = nn.Identity()
-    #         return _model
-    #     else:
-    #         raise ValueError('arch `{}` is currently not supported! must be one of [ {} ]'.format(arch, ' | '.join([
-    #             str(v) for v in cls.arch_fns.keys()
-    #         ])))
+            
+        
     
     @classmethod
     def get_optimizer(cls, name='sgd', model=None, lr=0.001, **kwargs):
@@ -748,16 +527,20 @@ class Network:
             # ])))
     
     @classmethod
-    def get_lr_scheduler(cls, type='step', optimizer=None, step_size=10, gamma=0.5, **kwargs):
-        if type == 'step':
-            lr_scheduler = StepLR(
-                optimizer,
-                step_size=int(max(1, step_size)),
-                gamma=np.clip(gamma, 0.0, 1.0),
-            )
+    def get_lr_scheduler(cls, optimizer=None, type='step', step=10, gamma=0.5, scale=0.1, **kwargs):
+        if type == 'none' or not isinstance(type, str):
+            _fn = lambda e: e
+        elif type == 'step':
+            _fn = LRSchedule.get_step_fn(step=step, gamma=gamma)
+        elif type == 'exp':
+            _fn = LRSchedule.get_exp_fn(gamma=gamma)
+        elif type == 'cos':
+            _fn = LRSchedule.get_cosine(step=step, min_scale=scale)
+        elif type == 'cos_exp':
+            _fn = LRSchedule.get_cosine_exp(step=step, min_scale=scale, gamma=gamma)
         else:
-            print('lr_scheduler [{}] could not be recognized | default to none')
-            lr_scheduler = lambda *args, **kwargs: None
+            raise NotImplementedError(f'lr scheduler {type} has not been implemented')
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_fn)
         return lr_scheduler
     
     @classmethod
@@ -771,15 +554,10 @@ class Network:
     
     @classmethod
     def save_stats(cls, _stats={}, fp_json_master='./logs/master2.json', time_stamp='<latest>'):
+        raise NotImplementedError('method no longer supported')
         # fp = args['stats_json']
         # fp_master = args['master_stats_json']
         fp_master = fp_json_master
-        
-        # if isinstance(fp, str) and fp.endswith('.json'):
-        #     _dp = os.path.split(fp)[0]
-        #     if not os.path.isdir(_dp):
-        #         os.makedirs(_dp)
-        #     _ = json.dump(_stats, open(fp, 'w'), indent=4)
         
         if isinstance(fp_master, str) and fp_master.endswith('.json'):
             _stats_master = {
@@ -835,4 +613,4 @@ class Network:
 
 # %%
 
-# %%
+# %%    

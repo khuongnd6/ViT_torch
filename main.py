@@ -65,7 +65,7 @@ config = [
     # ('multiple_frozen', 1, int, None, 'multiply the frozen train dataset by this amount'),
     # ('update_frozen_rate', 2, int, None, 'set to int >0 to update the frozen values every <this> epochs'),
     ('aug_auto_imagenet', 1, int, [0, 1]),
-    ('aug_random_crop', 1, int, [0, 1]),
+    # ('aug_random_crop', 1, int, [0, 1]),
     ('aug_color_jitter', 1, int, [0, 1]),
     ('image_size', 0, int),
     ('tire_settings', 0, int, None, 'settings [0-3] for tire dataset preprocessing'),
@@ -103,11 +103,26 @@ def main():
             limit_test=args['limit_test'],
         )
     elif args['dataset'] == 'tire':
-        if args['tire_settings'] == 0:
+        tire_kwargs = {
+            'zoom_amount': 2.0,
+            'random_crop_amount': 1.2,
+            'random_vflip': True,
+            'random_hflip': True,
+        }
+        lbp_methods = ['l', 'default', 'uniform']
+        if args['tire_settings'] == 1:
+            pass
+        elif args['tire_settings'] == 2:
+            tire_kwargs['zoom_amount'] = 2.4
+        elif args['tire_settings'] == 3:
+            tire_kwargs['zoom_amount'] = 2.4
+            tire_kwargs['random_crop_amount'] = 1.6
+        elif args['tire_settings'] == 0 or True:
+            args['tire_settings'] == 0
             lbp_methods = ['r', 'g', 'b', 'default', 'uniform', 'ror', 'nri_uniform']
-        elif args['tire_settings'] == 1:
-            lbp_methods = ['l', 'default', 'uniform']
+        _lbp_dict = {'radius': 2, 'point_mult': 8, 'methods': lbp_methods}
         
+        print('tire settings:', json.dumps(tire_kwargs), json.dumps(_lbp_dict))
         _image_channels = len(lbp_methods)
         assert args['image_size'] > 0, 'must provide arg `image_size` of int >0'
         ds = get_tire_dataset(
@@ -119,10 +134,18 @@ def main():
             limit=0,
             image_size=args['image_size'],
             # force_reload=False,
-            lbp={'radius': 1, 'point_mult': 8, 'methods': lbp_methods},
-            random_crop=bool(args['aug_random_crop']),
+            lbp=_lbp_dict,
+            # random_crop=bool(args['aug_random_crop']),
             color_jitter=bool(args['aug_color_jitter']),
             autoaugment_imagenet=bool(args['aug_auto_imagenet']),
+            
+            fill=128,
+            
+            **tire_kwargs,
+            # zoom_amount=2.0,
+            # random_crop_amount=1.2,
+            # random_hflip=True,
+            # random_vflip=True,
         )
     else:
         raise ValueError('arg `dataset` [{}] is not supported!'.format(args['dataset']))
@@ -161,9 +184,9 @@ def main():
         opt='sgd',
         loss_fn=nn.CrossEntropyLoss(),
         lr=args['lr'],
-        # lr_schedule_type='step',
-        lr_schedule_step=args['lr_schedule_half'],
-        lr_schedule_gamma=0.5,
+        lr_type='step',
+        lr_step=args['lr_schedule_half'],
+        lr_gamma=0.5,
         # pretrained=False,
         device=args['device'],
         # metrics_best=None,
@@ -187,6 +210,10 @@ def main():
             'time_finish': None,
             'time_elapsed': None,
             'mode': run_mode,
+            **({
+                **tire_kwargs,
+                'lbp': {**_lbp_dict},
+            } if args['dataset'] == 'tire' else {}),
         },
         **{_split: [] for _split in ['train', 'val']},
     }

@@ -1,24 +1,46 @@
 # %%
-import fiftyone as fo
-import fiftyone.zoo as foz
+import time, json, os
+import numpy as np
+import pandas as pd
+
 import torch
 import torchvision
-import time, json, os
+
+import fiftyone as fo
+import fiftyone.zoo as foz
+import fiftyone.utils.coco as fouc
 
 # %%
-import torch
-import fiftyone.utils.coco as fouc
 from PIL import Image
 from torchvision.transforms.transforms import Resize
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 from fiftyone import ViewField as F
 
-# From the torchvision references we cloned
 import torchvision.transforms as T
 from engine import train_one_epoch, evaluate
-import utils
+import torch_utils
 import argparse
+
+# from torchvision.models.detection import FasterRCNN
+# from torchvision.models.detection.rpn import AnchorGenerator
+
+import os
+os.environ['TORCH_HOME'] = '/host/ubuntu/torch'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
+# from models.swin import get_swin_model, get_swin_model_od, SwinTransformer
+# from models.vision_all import VisionModelZoo
+
+# %%
+# import warnings
+
+# def fxn():
+#     warnings.warn("user", UserWarning)
+
+# with warnings.catch_warnings():
+#     warnings.simplefilter("ignore")
+#     fxn()
 
 # %%
 time_stamp = time.strftime('%y%m%d_%H%M%S')
@@ -27,8 +49,10 @@ time_start = time.time()
 # %%
 parser = argparse.ArgumentParser()
 
+parser.add_argument('--arch', type=str, default='r50',)
 parser.add_argument('--epoch', type=int, default=10,)
 parser.add_argument('--bs', type=int, default=2)
+parser.add_argument('--image_size', type=int, default=0)
 
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lr_schedule_step', type=int, default=4,)
@@ -38,14 +62,29 @@ parser.add_argument('--train_limit', type=int, default=20000)
 parser.add_argument('--val_limit', type=int, default=5000)
 
 parser.add_argument('--data_path', type=str, default='/host/ubuntu/torch/coco2017')
+# parser.add_argument('--data_path', type=str, default='/host/ubuntu/torch/coco_2')
+parser.add_argument('--test', type=int, default=0)
+parser.add_argument('--device', type=str, default='cuda')
+
 
 args = parser.parse_args()
 
 # %%
-train_limit = args.train_limit
-val_limit = args.val_limit
-_lr = args.lr
-_bs = args.bs
+force_train_on_validation = False
+if args.test >= 1:
+    print('TEST MODE')
+    args.train_limit = 32
+    args.val_limit = 16
+    args.epoch = 2
+    args.bs = 2 
+    force_train_on_validation = True
+
+# train_limit = args.train_limit
+# val_limit = args.val_limit
+# _lr = args.lr
+# _bs = args.bs
+
+print(args)
 
 # %%
 class FiftyOneTorchDataset(torch.utils.data.Dataset):
@@ -60,16 +99,19 @@ class FiftyOneTorchDataset(torch.utils.data.Dataset):
             class names and indices. If None, it will use all classes present in the given fiftyone_dataset.
     """
     
-    def __init__(
-        self,
-        fiftyone_dataset,
-        transforms=None,
-        gt_field="ground_truth",
-        classes=None,
-    ):
+    def __init__(self,
+                fiftyone_dataset,
+                transforms=None,
+                gt_field="ground_truth",
+                classes=None,
+                image_size=None,
+                ):
         self.samples = fiftyone_dataset
         self.transforms = transforms
         self.gt_field = gt_field
+        self.image_size = image_size
+        if isinstance(self.image_size, int) and self.image_size > 0:
+            self.image_size = [self.image_size, self.image_size]
         
         self.img_paths = self.samples.values("filepath")
         
@@ -84,6 +126,51 @@ class FiftyOneTorchDataset(torch.utils.data.Dataset):
             self.classes = ["background"] + self.classes
         
         self.labels_map_rev = {c: i for i, c in enumerate(self.classes)}
+        
+        self.first_time_print = False
+    
+    # @classmethod
+    # def get_fit_to_od(cls, img, boxes=[], areas=[], shape=1000, fill=0, interpolation=Image.BICUBIC):
+    #     if isinstance(shape, int):
+    #         assert shape > 0
+    #         shape = [shape, shape]
+    #     assert isinstance(shape, (list, tuple)) and len(shape) == 2
+        
+    #     s0 = img.size[:2]
+    #     s1 = shape
+        
+    #     scales = [v1 / v0 for v0, v1 in zip(s0, s1)]
+    #     scale = min(scales)
+    #     pad_axis = np.argmax(scales)
+        
+    #     s2 = [*s1]
+    #     s2[pad_axis] = int(np.ceil(s0[pad_axis] * scale))
+    #     offset = [0, 0]
+    #     offset[pad_axis] = int(np.floor((s1[pad_axis] - s2[pad_axis]) / 2))
+    #     s2
+        
+    #     if img.mode in ['RGB', 'L']:
+    #         img1 = Image.new(img.mode, s1, fill)
+    #     else:
+    #         raise ValueError('img must have be rank 2 or 3')
+    #     img2 = img.resize(s2, resample=interpolation)
+    #     img1.paste(img2, offset)
+        
+    #     boxes1 = [
+    #         [
+    #             v[0] * scale + offset[0],
+    #             v[1] * scale + offset[1],
+    #             v[2] * scale + offset[0],
+    #             v[3] * scale + offset[1],
+    #         ]
+    #         for v in boxes
+    #     ]
+    #     areas1 = [
+    #         v * (scale ** 2)
+    #         for v in areas
+    #     ]
+        
+    #     return img1, boxes1, areas1
     
     def __getitem__(self, idx):
         img_path = self.img_paths[idx]
@@ -105,6 +192,21 @@ class FiftyOneTorchDataset(torch.utils.data.Dataset):
             labels.append(coco_obj.category_id)
             area.append(coco_obj.area)
             iscrowd.append(coco_obj.iscrowd)
+        
+        # if isinstance(self.image_size, (list, tuple)):
+        #     _txt_before = 'before: img_size [{}] | boxes {} | area {}'.format(
+        #         img.size, boxes, area)
+        #     img, boxes, area = self.get_fit_to_od(
+        #         img, boxes, area,
+        #         shape=self.image_size,
+        #         fill=0,
+        #     )
+        #     _txt_after = 'before: img_size [{}] | boxes {} | area {}'.format(
+        #         img.size, boxes, area)
+        #     # if self.first_time_print:
+        #     #     print(_txt_before)
+        #     #     print(_txt_after)
+        #     #     self.first_time_print = False
         
         target = {}
         target["boxes"] = torch.as_tensor(boxes, dtype=torch.float32)
@@ -150,12 +252,17 @@ class Datasets_COCO2017:
                 bs=4,
                 shuffle=True,
                 num_workers=8,
+                force_train_on_validation=False,
+                image_transform=[],
+                image_size=None,
                 ):
         self.dataset_name = 'coco-2017'
         self.split_mapping = {
             'train': 'train',
             'val': 'validation',
         }
+        # if force_train_on_validation:
+        #     self.split_mapping['train'] = 'validation'
         self.splits = splits
         self.views = {}
         self.sets = {}
@@ -188,25 +295,44 @@ class Datasets_COCO2017:
         
         for i, _split in enumerate(self.splits):
             _training = _split == 'train'
-            if not isinstance(coco_split_overwrite, str):
-                if _split not in self.split_mapping:
-                    raise ValueError('split [{}] is not supported with dataset [{}]'.format(
-                        _split, self.dataset_name
-                    ))
-            coco_split = coco_split_overwrite
+            # if not isinstance(coco_split_overwrite, str):
+            #     if _split not in self.split_mapping:
+            #         raise ValueError('split [{}] is not supported with dataset [{}]'.format(
+            #             _split, self.dataset_name
+            #         ))
+            # coco_split = coco_split_overwrite
             coco_split = self.split_mapping[_split]
-            _foz_set = foz.load_zoo_dataset(
-                name=self.dataset_name,
-                split=coco_split,
-                # splits=None,
-                # label_field=None,
-                # dataset_name=None,
-                dataset_dir=self.data_path,
-                # download_if_necessary=True,
-                # drop_existing_dataset=False,
-                # overwrite=False,
-                # cleanup=True,
+            
+            _limit = None
+            if isinstance(limits, int):
+                _limit = limits
+            elif isinstance(limits, (list, tuple)) and len(limits) > i:
+                _limit = limits[i]
+            print('limit [{}] to [{}] samples'.format(_split, _limit))
+            
+            # _foz_set = foz.load_zoo_dataset(
+            #     name=self.dataset_name,
+            #     split=coco_split,
+            #     # split='validation',
+            #     # splits=None,
+            #     # label_field=None,
+            #     # dataset_name=None,
+            #     dataset_dir=self.data_path,
+            #     # download_if_necessary=True,
+            #     # drop_existing_dataset=False,
+            #     # overwrite=False,
+            #     # cleanup=True,
+            # )
+            
+            dataset_dir = os.path.join(self.data_path, coco_split)
+            dataset_type = fo.types.COCODetectionDataset
+            _foz_set = fo.Dataset.from_dir(
+                dataset_dir=dataset_dir,
+                dataset_type=dataset_type,
+                max_samples=_limit,
+                shuffle=shuffle and _training,
             )
+            
             _foz_set.compute_metadata()
             raw_count = len(_foz_set)
             _set = _foz_set
@@ -216,7 +342,7 @@ class Datasets_COCO2017:
             #     'chair', 'person', 'bench',
             #     'bird', 'cat', 'dog',
             # ]
-            if _training:
+            if _training or True:
                 _set = _set.filter_labels(
                     "ground_truth",
                     F("label").is_in(self.labels),
@@ -224,13 +350,10 @@ class Datasets_COCO2017:
                 # _set = _set.match(
                 #     F("predictions.detections").filter(F("label").is_in(self.labels)).length() > 0
                 # )
+            # else:
+            #     all_labels_train
             
             filtered_count = len(_set)
-            _limit = raw_count
-            if isinstance(limits, int):
-                _limit = limits
-            elif isinstance(limits, (list, tuple)) and len(limits) > i:
-                _limit = limits[i]
             _view = _set.take(_limit, seed=0)
             _view
             self.views[_split] = _view
@@ -240,6 +363,7 @@ class Datasets_COCO2017:
                 # gt_field="ground_truth",
                 # classes=None,
                 classes=self.labels,
+                image_size=image_size,
             )
             _bs = self.bs
             if not _training:
@@ -250,7 +374,7 @@ class Datasets_COCO2017:
                 batch_size=_bs,
                 shuffle=shuffle and _training,
                 num_workers=num_workers,
-                collate_fn=utils.collate_fn,
+                collate_fn=torch_utils.collate_fn,
             )
             
             self.sets[_split] = torch_dataset
@@ -287,11 +411,12 @@ def do_training(
             lr_schedule_step=4,
             lr_schedule_gamma=0.3,
             initial_validation=True,
+            device='cuda',
             ):
     
     # train on the GPU or on the CPU, if a GPU is not available
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    print("Using device %s" % device)
+    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    # print("Using device %s" % device)
     
     # move model to the right device
     model.to(device)
@@ -394,14 +519,85 @@ def do_training(
         
     return metric_loggers, coco_evaluators
 
+# ds = Datasets_COCO2017(
+#     splits=['val'],
+#     labels=['car', 'truck', 'bus', 'bicycle'],
+#     data_path='/host/ubuntu/torch/coco2017',
+#     limits=[32],
+#     # coco_split_overwrite=None,
+#     bs=4,
+#     # shuffle=True,
+#     num_workers=16,
+#     # force_train_on_validation=True,
+# )
+# print('loaded dataset [{}]: {}'.format(ds.dataset_name, json.dumps(ds.info, indent=4)))
 
 # %%
+# loader = ds.loaders['val']
+# _, a = next(enumerate(loader))
+# type(a), len(a)
+
+# %%
+
+
+# %%
+image_size = 0
+if args.arch.startswith('swin'):
+    image_size = 224
+    image_size = 384
+
 ds = Datasets_COCO2017(
     splits=['train', 'val'],
     labels=None,
     data_path=args.data_path,
+    limits=[args.train_limit, args.val_limit],
+    # coco_split_overwrite=None,
+    bs=args.bs,
+    # shuffle=True,
+    num_workers=8,
+    force_train_on_validation=force_train_on_validation,
+    image_size=args.image_size,
 )
 print('loaded dataset [{}]: {}'.format(ds.dataset_name, json.dumps(ds.info, indent=4)))
+
+# if args.arch.startswith('swin'):
+#     print('using swin backbone [{}]'.format(args.arch))
+#     # model_bb = get_swin_model(args.arch, True)
+#     # model_bb = get_swin_model_od('swin_base_patch4_window12_384', pretrained=True)
+#     model_bb = get_swin_model_od(args.arch, pretrained=True)
+#     image_size = 384
+    
+#     model_bb.to(args.device)
+    
+#     _output_shape = VisionModelZoo.get_output_shape(model_bb, (2, 3, model_bb.img_size, model_bb.img_size), device=args.device)
+#     _output_shape
+    
+#     model_bb.out_channels = _output_shape[1]
+    
+#     anchor_generator = AnchorGenerator(
+#         # sizes=((32, 64, 128, 256, 512),),
+#         # aspect_ratios=((0.5, 1.0, 2.0),)),
+#         sizes=((16,), (32,), (64,), (128,), (256,)),
+#         aspect_ratios=tuple([(0.25, 0.5, 1.0, 2.0) for _ in range(5)]),
+#     )
+    
+    
+#     roi_pooler = torchvision.ops.MultiScaleRoIAlign(featmap_names=['0'],
+#                                                     output_size=7,
+#                                                     sampling_ratio=2)
+    
+#     model_swin_frcnn = FasterRCNN(
+#         model_bb,
+#         min_size=model_bb.img_size,
+#         max_size=model_bb.img_size,
+#         num_classes=ds.num_labels,
+#         rpn_anchor_generator=anchor_generator,
+#         box_roi_pool=roi_pooler,
+#     )
+    
+#     model = model_swin_frcnn
+# else:
+#     model = get_model_FRCNN(ds.num_labels)
 
 model = get_model_FRCNN(ds.num_labels)
 
@@ -416,6 +612,7 @@ do_training(
     lr_schedule_step=args.lr_schedule_step,
     lr_schedule_gamma=args.lr_schedule_gamma,
     # initial_validation=True,
+    device=args.device,
 )
 
 # %%

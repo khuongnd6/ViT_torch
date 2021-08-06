@@ -16,6 +16,7 @@ from .matcher import build_matcher
 from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
                            dice_loss, sigmoid_focal_loss)
 from .transformer import build_transformer
+from .swin import get_swin_model_od
 
 
 class DETR(nn.Module):
@@ -310,14 +311,22 @@ def build(args):
     # you should pass `num_classes` to be 2 (max_obj_id + 1).
     # For more details on this, check the following discussion
     # https://github.com/facebookresearch/detr/issues/108#issuecomment-650269223
-    num_classes = 20 if args.dataset_file != 'coco' else 91
-    if args.dataset_file == "coco_panoptic":
-        # for panoptic, we just add a num_classes that is large enough to hold
-        # max_obj_id + 1, but the exact value doesn't really matter
-        num_classes = 250
+    # num_classes = 20 if args.dataset_file != 'coco' else 91
+    # if args.dataset_file == "coco_panoptic":
+    #     # for panoptic, we just add a num_classes that is large enough to hold
+    #     # max_obj_id + 1, but the exact value doesn't really matter
+    #     num_classes = 250
+    # if isinstance(args.classes, list) and len(args.classes) > 0:
+    #     if num_classes > len(args.classes) + 1:
+    #         num_classes = len(args.classes) + 1
+    num_classes = args.num_classes
+    
     device = torch.device(args.device)
 
     backbone = build_backbone(args)
+    
+    # model = get_model_FRCNN(num_classes)
+
 
     transformer = build_transformer(args)
 

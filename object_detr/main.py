@@ -16,6 +16,7 @@ import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
+from models.swin import SwinTransformerOD, get_swin_model_od
 
 from PIL import Image
 import torchvision
@@ -114,10 +115,30 @@ def get_args_parser():
     parser.add_argument('--distributed', default=0, type=int)
     parser.add_argument('--train_limit', default=0, type=int)
     parser.add_argument('--val_limit', default=0, type=int)
+    # parser.add_argument('--class_limit', default=0, type=int)
+    parser.add_argument('--classes', default=[], nargs='+', type=int)
+    parser.add_argument('--num_classes', default=91, type=int)
+    
     return parser
 
 parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
 args = parser.parse_args()
+
+# %%
+# num_classes = 20
+# num_classes_dict = {
+#     'coco': 91,
+#     'coco_panoptic': 250,
+# }
+# if args.dataset_file in num_classes_dict:
+#     num_classes = num_classes_dict[args.dataset_file]
+if isinstance(args.classes, list) and len(args.classes) > 0:
+    args.num_classes = len(args.classes) + 1
+
+# args.num_classes = num_classes
+print('num_classes:', args.num_classes)
+
+# %%
 print('args:', json.dumps(args.__dict__, indent=4))
 
 # %%
@@ -154,6 +175,23 @@ if args.dataset_file == "coco_panoptic":
 else:
     base_ds = get_coco_api_from_dataset(dataset_val)
 
+_ds = {
+    'sets': {
+        'train': dataset_train,
+        'val': dataset_val,
+    },
+    'loaders': {
+        'train': data_loader_train,
+        'val': data_loader_val,
+    },
+}
+print(json.dumps({
+    k: {
+        k1: len(v1)
+        for k1, v1 in v.items()
+    }
+    for k, v in _ds.items()
+}, indent=4))
 
 # %%
 def get_model_FRCNN(num_classes):
@@ -323,25 +361,14 @@ def do_training(
     # return metric_loggers, coco_evaluators
 
 # %%
-num_classes = 20
-num_classes_dict = {
-    'coco': 91,
-    'coco_panoptic': 250,
-}
-if args.dataset_file in num_classes_dict:
-    num_classes = num_classes_dict[args.dataset_file]
-
-print('num_classes:', num_classes)
-
-# %%
-# model = get_model_FRCNN(num_classes)
-# model
-
-
 model, criterion, postprocessors = build_model(args)
-model.to('cuda')
 model
 
+# %%
+
+# %%
+
+model.to('cuda')
 # %%
 do_training(
     model=model,

@@ -15,6 +15,7 @@ from util.misc import NestedTensor, is_main_process
 
 from .position_encoding import build_position_encoding
 
+from .swin import get_swin_model_od
 
 class FrozenBatchNorm2d(torch.nn.Module):
     """
@@ -62,15 +63,22 @@ class BackboneBase(nn.Module):
         for name, parameter in backbone.named_parameters():
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
                 parameter.requires_grad_(False)
-        if return_interm_layers:
-            return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
-        else:
-            return_layers = {'layer4': "0"}
-        self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        # if return_interm_layers:
+        #     return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
+        # else:
+        #     return_layers = {'layer4': "0"}
+        return_layers = {'norm': "0"}
+        # self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
         self.num_channels = num_channels
+        self.backbone = backbone
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self.body(tensor_list.tensors)
+        # xs = self.body(tensor_list.tensors)
+        
+        xs = OrderedDict()
+        x = self.backbone(tensor_list.tensors)
+        xs['0'] = x
+        
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
             m = tensor_list.mask
@@ -86,10 +94,17 @@ class Backbone(BackboneBase):
                  train_backbone: bool,
                  return_interm_layers: bool,
                  dilation: bool):
-        backbone = getattr(torchvision.models, name)(
-            replace_stride_with_dilation=[False, False, dilation],
-            pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
-        num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        
+        # backbone = getattr(torchvision.models, name)(
+        #     replace_stride_with_dilation=[False, False, dilation],
+        #     pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
+        # num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        
+        # SET SWIN MODEL
+        # backbone = get_swin_model_od('swin_base_patch4_window12_384', pretrained=True)
+        backbone = get_swin_model_od('swin_large_patch4_window12_384_22k', pretrained=True)
+        num_channels = backbone.num_channels
+        
         super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
 
 

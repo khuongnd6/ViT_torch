@@ -2,7 +2,6 @@
 import time, os, json, string, re, datetime
 import argparse
 import numpy as np
-from tabulate import Line
 
 import torch
 from torch.nn.modules.activation import GELU

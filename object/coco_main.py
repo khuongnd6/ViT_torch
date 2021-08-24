@@ -548,13 +548,12 @@ if args.arch.startswith('swin'):
 
 ds = Datasets_COCO2017(
     splits=['train', 'val'],
-    # labels=None,
-    labels=Datasets_COCO2017.all_labels_train[:5],
+    labels=None,
     data_path=args.data_path,
     limits=[args.train_limit, args.val_limit],
     # coco_split_overwrite=None,
     bs=args.bs,
-    shuffle=False,
+    # shuffle=True,
     num_workers=8,
     force_train_on_validation=force_train_on_validation,
     image_size=args.image_size,

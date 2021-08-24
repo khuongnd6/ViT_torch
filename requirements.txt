@@ -3,5 +3,7 @@ torchvision
 nvidia-ml-py3
 numpy
 pandas
-# plotly
-# nbformat==4.2
+pillow
+# fiftyone==0.11.1
+plotly
+nbformat==4.2

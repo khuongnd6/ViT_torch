@@ -21,6 +21,7 @@ import torchvision.transforms as T
 from engine import train_one_epoch, evaluate
 import torch_utils
 import argparse
+from coco_datasets import CocoDetectionCustom, fit_to_od
 
 # from torchvision.models.detection import FasterRCNN
 # from torchvision.models.detection.rpn import AnchorGenerator
@@ -65,6 +66,7 @@ parser.add_argument('--data_path', type=str, default='/host/ubuntu/torch/coco201
 # parser.add_argument('--data_path', type=str, default='/host/ubuntu/torch/coco_2')
 parser.add_argument('--test', type=int, default=0)
 parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--num_workers', type=int, default=4)
 
 
 args = parser.parse_args()
@@ -253,7 +255,8 @@ class Datasets_COCO2017:
                 shuffle=True,
                 num_workers=8,
                 force_train_on_validation=False,
-                image_transform=[],
+                # transforms_train=[],
+                # transforms_val=[],
                 image_size=None,
                 ):
         self.dataset_name = 'coco-2017'
@@ -273,6 +276,7 @@ class Datasets_COCO2017:
             _split: T.Compose([T.ToTensor()])
             for _split in self.splits
         }
+        
         self.bs = bs
         
         self.labels = None
@@ -310,6 +314,7 @@ class Datasets_COCO2017:
                 _limit = limits[i]
             print('limit [{}] to [{}] samples'.format(_split, _limit))
             
+            # fiftyone dataset zoo
             # _foz_set = foz.load_zoo_dataset(
             #     name=self.dataset_name,
             #     split=coco_split,
@@ -324,6 +329,7 @@ class Datasets_COCO2017:
             #     # cleanup=True,
             # )
             
+            # fiftyone from dir
             dataset_dir = os.path.join(self.data_path, coco_split)
             dataset_type = fo.types.COCODetectionDataset
             _foz_set = fo.Dataset.from_dir(
@@ -334,37 +340,70 @@ class Datasets_COCO2017:
             )
             
             _foz_set.compute_metadata()
-            raw_count = len(_foz_set)
+            
             _set = _foz_set
             
-            # labels_list = [
-            #     'car', 'truck', 'bus', 'bicycle',
-            #     'chair', 'person', 'bench',
-            #     'bird', 'cat', 'dog',
-            # ]
+            # # labels_list = [
+            # #     'car', 'truck', 'bus', 'bicycle',
+            # #     'chair', 'person', 'bench',
+            # #     'bird', 'cat', 'dog',
+            # # ]
             if _training or True:
                 _set = _set.filter_labels(
                     "ground_truth",
                     F("label").is_in(self.labels),
                 )
-                # _set = _set.match(
-                #     F("predictions.detections").filter(F("label").is_in(self.labels)).length() > 0
-                # )
-            # else:
-            #     all_labels_train
+            #     # _set = _set.match(
+            #     #     F("predictions.detections").filter(F("label").is_in(self.labels)).length() > 0
+            #     # )
+            # # else:
+            # #     all_labels_train
             
+            
+            # torchvision datasets coco
+            
+            # _set = CocoDetectionCustom(
+            #     root=os.path.join(self.data_path, coco_split),
+            #     # transform=TT.Compose([]),
+            #     # target_transform=TT.Compose([]),
+            #     image_size=image_size,
+            #     limit=_limit,
+            #     shuffle_raw=False,
+            # )
+            
+            # _transforms_list = []
+            # _transforms_target_list = []
+            # if image_size > 0:
+            #     _transforms_list.append(fit_to_od(shape=image_size, fill=0))
+            #     _transforms_target_list.append(fit_to_od(shape=image_size, fill=0))
+            # _transforms_list.append(T.ToTensor())
+
+            # _set = torchvision.datasets.CocoDetection(
+            #     root=os.path.join(self.data_path, coco_split, 'data'),
+            #     annFile=os.path.join(self.data_path, coco_split, 'labels.json'),
+            #     transforms=T.Compose(_transforms_list),
+            #     # transform=T.Compose(_transforms_list),
+            #     # target_transform=T.Compose(),
+            # )
+            # if isinstance(_limit, int) and _limit > 0:
+            #     _set = torch.utils.data.Subset(_set, torch.arange(_limit))
+            
+            
+            raw_count = len(_set)
             filtered_count = len(_set)
-            _view = _set.take(_limit, seed=0)
-            _view
-            self.views[_split] = _view
+            # _view = _set.take(_limit, seed=0)
+            # _view
+            # self.views[_split] = _view
             torch_dataset = FiftyOneTorchDataset(
-                fiftyone_dataset=_view,
+                fiftyone_dataset=_set,
                 transforms=transform[_split],
                 # gt_field="ground_truth",
                 # classes=None,
                 classes=self.labels,
                 image_size=image_size,
             )
+            self.views[_split] = _set
+            torch_dataset = _set
             _bs = self.bs
             if not _training:
                 # lock val/test bs to 1 (for now)
@@ -519,44 +558,32 @@ def do_training(
         
     return metric_loggers, coco_evaluators
 
-# ds = Datasets_COCO2017(
-#     splits=['val'],
-#     labels=['car', 'truck', 'bus', 'bicycle'],
-#     data_path='/host/ubuntu/torch/coco2017',
-#     limits=[32],
-#     # coco_split_overwrite=None,
-#     bs=4,
-#     # shuffle=True,
-#     num_workers=16,
-#     # force_train_on_validation=True,
-# )
-# print('loaded dataset [{}]: {}'.format(ds.dataset_name, json.dumps(ds.info, indent=4)))
-
-# %%
-# loader = ds.loaders['val']
-# _, a = next(enumerate(loader))
-# type(a), len(a)
-
-# %%
-
-
 # %%
 image_size = 0
 if args.arch.startswith('swin'):
     image_size = 224
     image_size = 384
 
+# _transforms_list = []
+# if image_size > 0:
+#     _transforms_list.append(fit_to_od(shape=image_size, fill=0))
+# _transforms_list.append(T.ToTensor())
+
+
 ds = Datasets_COCO2017(
     splits=['train', 'val'],
-    labels=None,
+    # labels=None,
+    labels=Datasets_COCO2017.all_labels_train[:5],
     data_path=args.data_path,
     limits=[args.train_limit, args.val_limit],
     # coco_split_overwrite=None,
     bs=args.bs,
-    # shuffle=True,
-    num_workers=8,
+    shuffle=False,
+    num_workers=args.num_workers,
     force_train_on_validation=force_train_on_validation,
     image_size=args.image_size,
+    # transforms_train=T.Compose(_transforms_list),
+    # transforms_val=T.Compose(_transforms_list),
 )
 print('loaded dataset [{}]: {}'.format(ds.dataset_name, json.dumps(ds.info, indent=4)))
 

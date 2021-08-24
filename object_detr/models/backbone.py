@@ -60,17 +60,19 @@ class BackboneBase(nn.Module):
 
     def __init__(self, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
         super().__init__()
-        for name, parameter in backbone.named_parameters():
-            if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
-                parameter.requires_grad_(False)
+        # for name, parameter in backbone.named_parameters():
+        #     if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+        #         parameter.requires_grad_(False)
         # if return_interm_layers:
         #     return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
         # else:
         #     return_layers = {'layer4': "0"}
-        return_layers = {'norm': "0"}
+        # return_layers = {'norm': "0"}
         # self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
         self.num_channels = num_channels
         self.backbone = backbone
+        if not callable(self.backbone):
+            self.backbone = lambda v: v
 
     def forward(self, tensor_list: NestedTensor):
         # xs = self.body(tensor_list.tensors)
@@ -101,9 +103,12 @@ class Backbone(BackboneBase):
         # num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
         
         # SET SWIN MODEL
-        # backbone = get_swin_model_od('swin_base_patch4_window12_384', pretrained=True)
-        backbone = get_swin_model_od('swin_large_patch4_window12_384_22k', pretrained=True)
-        num_channels = backbone.num_channels
+        
+        # backbone = get_swin_model_od(name, pretrained=True)
+        # backbone = get_swin_model_od('swin_large_patch4_window12_384_22k', pretrained=True)
+        # num_channels = backbone.num_channels
+        backbone = None
+        num_channels = 3
         
         super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
 
@@ -126,7 +131,8 @@ class Joiner(nn.Sequential):
 
 def build_backbone(args):
     position_embedding = build_position_encoding(args)
-    train_backbone = args.lr_backbone > 0
+    # train_backbone = args.lr_backbone > 0
+    train_backbone = True
     return_interm_layers = args.masks
     backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
     model = Joiner(backbone, position_embedding)

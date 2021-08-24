@@ -9,3 +9,8 @@ main_backup_210629.py
 *.cpython-38.pyc
 vision/*
 data/*
+object/logs/tmp/*
+object_backup/*
+object/logs/*.json
+object_detr/*
+

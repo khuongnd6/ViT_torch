@@ -1,21 +1,26 @@
 # ViT_torch
-repos for all things Vision Transformer in PyTorch
+Repos for reproducing and experiments with Vision Transformer in PyTorch
 
 ## ViT Architectures
 Currently supporting:
-- All DINO backbones (S/16, S/8, B/16, B/8)
-- All CAIT backbones
+- All DINO Transformer backbones (S/16, S/8, B/16, B/8)
+- All CAIT Transformer backbones
 - Resnet CNN: resnext50_32x4d, resnext101_32x8d, wide_resnet50_2, wide_resnet101_2
+- Fast/FasterRCNN
+- Swin-based Transformer (work in progress)
 ## Datasets/Tasks
-Currently supporting:
+### Classification:
 - STL-10
 - Cifar10, Cifar100
+- ImageNet1k (coming soon)
+### Object Detection:
+- COCO-2017
 ## Installation
 - Install python>=3.8
 ```
 python -m pip install -r requirements.txt
 ```
-## Run
+## Run - Classification
 - Finetune
 ```bash
 # (example with 30 epochs on stl10 from pretrained dino_vitb8 with sgd at 0.001 initial learning rate, 4 fc layers)

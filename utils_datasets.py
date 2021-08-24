@@ -886,7 +886,7 @@ class Datasets:
                     sampler=_sampler,
                     batch_size=_bs,
                     num_workers=num_workers,
-                    pin_memory=True,
+                    pin_memory=False,
                     drop_last=False,
                 )
             else:

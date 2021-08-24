@@ -40,35 +40,65 @@ time_start_master = time.time()
 time_stamp = time.strftime('%y%m%d_%H%M%S')
 
 # %%
+# config = [
+#     ('device',  'cuda',  str,  ['cuda', 'cpu']),
+#     ('epoch',  100,  int, None, 'number of training epochs'),
+#     ('dataset', 'tire', str, None, 'name of the dataset'),
+#     ('data_path', '/host/ubuntu/torch/tire/tire_500', str, None, 'path to the local image folder'),
+#     ('bs', 512, int, None, 'batch size'),
+#     ('root_path', '/host/ubuntu/torch', str, None, 'path of the folder to put the pretrained models and download datasets'),
+#     ('arch', 'dino_vits16', str, None, 'backbone network architecture'),
+#     ('lr', 0.001, float, None, 'initial learning rate'),
+#     ('lr_schedule_half', 10, int, None, 'number of epochs between halving the learning rate'),
+#     ('limit_train', 0, int, None, 'set to int >0 to limit the number of training samples'),
+#     ('limit_test', 0, int, None, 'set to int >0 to limit the number of testing samples'),
+#     ('stats_json', ''.format(time_stamp), str),
+#     ('master_stats_json', './logs/stats_master.json', str),
+#     # ('test_only', False, bool),
+#     # ('train_only', False, bool),
+#     ('lineareval', False, bool),
+#     # ('earlystopping', True, bool),
+#     ('pretrained', False, bool),
+#     ('note', '', str, None, 'note to recognize the run'),
+#     ('opt', 'sgd', str, None, 'set the optimizer'),
+#     ('fc', [], int, None, 'the units for the additional fc layers'),
+#     # ('multiple_frozen', 1, int, None, 'multiply the frozen train dataset by this amount'),
+#     # ('update_frozen_rate', 2, int, None, 'set to int >0 to update the frozen values every <this> epochs'),
+#     ('aug_auto_imagenet', 1, int, [0, 1]),
+#     # ('aug_random_crop', 1, int, [0, 1]),
+#     ('aug_color_jitter', 1, int, [0, 1]),
+#     ('image_size', 0, int),
+#     ('tire_settings', 0, int, None, 'settings [0-3] for tire dataset preprocessing'),
+# ]
+
 config = [
     ('device',  'cuda',  str,  ['cuda', 'cpu']),
     ('epoch',  100,  int, None, 'number of training epochs'),
-    ('dataset', 'tire', str, None, 'name of the dataset'),
-    ('data_path', '/host/ubuntu/torch/tire/tire_500', str, None, 'path to the local image folder'),
-    ('bs', 512, int, None, 'batch size'),
+    ('dataset', 'stl10', str, None, 'name of the dataset'),
+    ('data_path', '/host/ubuntu/torch', str, None, 'path to the local image folder'),
+    ('bs', 128, int, None, 'batch size'),
     ('root_path', '/host/ubuntu/torch', str, None, 'path of the folder to put the pretrained models and download datasets'),
-    ('arch', 'dino_vits16', str, None, 'backbone network architecture'),
+    ('arch', 'swin_base_patch4_window7_224', str, None, 'backbone network architecture'),
     ('lr', 0.001, float, None, 'initial learning rate'),
-    ('lr_schedule_half', 10, int, None, 'number of epochs between halving the learning rate'),
+    ('lr_scheduler', 'step', str, ['none', 'step', 'exp', 'cos', 'ca', 'cos_exp'], 'type of lr scheduler'),
+    ('lr_step', 10, int, None, 'the number of epochs between each scheduling step'),
+    ('lr_gamma', 0.5, float, None, 'the rate of reducing for the learning rate'),
+    ('lr_scale', 0.1, float, None, 'the min scale ratio for some scheduler'),
     ('limit_train', 0, int, None, 'set to int >0 to limit the number of training samples'),
     ('limit_test', 0, int, None, 'set to int >0 to limit the number of testing samples'),
-    ('stats_json', ''.format(time_stamp), str),
-    ('master_stats_json', './logs/stats_master.json', str),
-    # ('test_only', False, bool),
-    # ('train_only', False, bool),
-    ('lineareval', False, bool),
-    # ('earlystopping', True, bool),
-    ('pretrained', False, bool),
+    # ('stats_json', ''.format(time_stamp), str),
+    ('stats_fp', './logs/massA/stats_{}.json'.format(time_stamp), str),
+    ('lineareval', False, bool, None, 'include to set training mode to be similar to lineareval protocol, the backbone model is frozen, only the classifier head is finetuned'),
+    ('earlystop_epoch', 5, int, None, 'the number of epochs without improvement to stop the training process early'),
+    ('pretrained', False, bool, None, 'include to load the pretrained model from arch, note that it is not available for all archs'),
     ('note', '', str, None, 'note to recognize the run'),
     ('opt', 'sgd', str, None, 'set the optimizer'),
     ('fc', [], int, None, 'the units for the additional fc layers'),
-    # ('multiple_frozen', 1, int, None, 'multiply the frozen train dataset by this amount'),
-    # ('update_frozen_rate', 2, int, None, 'set to int >0 to update the frozen values every <this> epochs'),
-    ('aug_auto_imagenet', 1, int, [0, 1]),
+    # ('aug_auto_imagenet', 1, int, [0, 1]),
     # ('aug_random_crop', 1, int, [0, 1]),
-    ('aug_color_jitter', 1, int, [0, 1]),
-    ('image_size', 0, int),
-    ('tire_settings', 0, int, None, 'settings [0-3] for tire dataset preprocessing'),
+    # ('aug_color_jitter', 1, int, [0, 1]),
+    ('image_size', 0, int, None, 'size to resize the input image to, defaults to 0 meaning image is untouch'),
+    # ('tire_settings', 0, int, None, 'settings [0-3] for tire dataset preprocessing'),
 ]
 
 def main():
@@ -151,7 +181,9 @@ def main():
         raise ValueError('arg `dataset` [{}] is not supported!'.format(args['dataset']))
     print('dataset: {}'.format(json.dumps(ds.info, indent=4)))
     
+    _run_mode = '<unknown>'
     if args['lineareval']:
+        _run_mode = 'lineareval'
         _model_backbone = VisionModelZoo.get_model(
             args['arch'],
             pretrained=args['pretrained'],
@@ -169,6 +201,7 @@ def main():
             # GELU(),
         )
     else:
+        _run_mode = 'finetune'
         frozen_model_bottom = []
         model = VisionModelZoo.get_model(
             args['arch'],
@@ -177,54 +210,77 @@ def main():
             classifier=[*args['fc'], ds.num_labels],
         )
     
+
+    _telem = {
+        'hardware': '1x3090',
+        'sample_count_train': ds.info['sample_count']['train'],
+        'sample_count_val': ds.info['sample_count']['test'],
+        'completed': False,
+        'time_stamp': time_stamp,
+        'time_start': None,
+        'time_finish': None,
+        'time_elapsed': None,
+        'mode': _run_mode,
+        
+        # 'hardware': '1x3090',
+        # # 'gpu_total_memory': float(smi.info['total']),
+        # 'sample_count_train': ds.info['sample_count']['train'],
+        # 'sample_count_val': ds.info['sample_count']['test'],
+        # 'completed': False,
+        # 'time_stamp': time_stamp,
+        # 'time_start': time_start,
+        # 'time_finish': None,
+        # 'time_elapsed': None,
+        # 'mode': run_mode,
+        # **({
+        #     **tire_kwargs,
+        #     'lbp': {**_lbp_dict},
+        # } if args['dataset'] == 'tire' else {}),
+    }
     net = Network(
         model=model,
         frozen_model_bottom=frozen_model_bottom,
-        # frozen_model_top=[],
-        opt='sgd',
+        # opt='adamw',
+        opt=args['opt'],
         loss_fn=nn.CrossEntropyLoss(),
         lr=args['lr'],
-        lr_type='step',
-        lr_step=args['lr_schedule_half'],
-        lr_gamma=0.5,
-        # pretrained=False,
+        lr_type=args['lr_scheduler'],
+        lr_step=args['lr_step'],
+        lr_gamma=args['lr_gamma'],
+        lr_scale=args['lr_scale'],
         device=args['device'],
-        # metrics_best=None,
+        stats_fp=args['stats_fp'],
+        epochs=args['epoch'],
+        earlystop_epoch=args['earlystop_epoch'],
+        
+        metrics=['lr'],
+        info={**args},
+        telem=_telem,
+        splits=['train', 'val'],
+        use_default_acc=True,
+        use_default_loss=True,
+        
+        ds=ds,
     )
     
     run_mode = 'finetune'
     if args.get('lineareval'):
         run_mode = 'lineareval'
 
-    time_start = time.time()
-    stats = {
-        'info': {**args},
-        'telem': {
-            'hardware': '1x3090',
-            # 'gpu_total_memory': float(smi.info['total']),
-            'sample_count_train': ds.info['sample_count']['train'],
-            'sample_count_val': ds.info['sample_count']['test'],
-            'completed': False,
-            'time_stamp': time_stamp,
-            'time_start': time_start,
-            'time_finish': None,
-            'time_elapsed': None,
-            'mode': run_mode,
-            **({
-                **tire_kwargs,
-                'lbp': {**_lbp_dict},
-            } if args['dataset'] == 'tire' else {}),
-        },
-        **{_split: [] for _split in ['train', 'val']},
-    }
+    # time_start = time.time()
+    # stats = {
+    #     'info': {**args},
+    #     'telem': _telem,
+    #     **{_split: [] for _split in ['train', 'val']},
+    # }
     net.fit(
-        dataloader_train=ds.loaders['train'],
-        dataloader_val=ds.loaders['test'],
-        epochs=args['epoch'],
-        # epoch_start=0,
-        fp_json_master=args['master_stats_json'],
-        time_stamp=time_stamp,
-        stats=stats,
+        # dataloader_train=ds.loaders['train'],
+        # dataloader_val=ds.loaders['test'],
+        # epochs=args['epoch'],
+        # # epoch_start=0,
+        # # fp_json_master=args['master_stats_json'],
+        # time_stamp=time_stamp,
+        # stats=stats,
     )
 
     
